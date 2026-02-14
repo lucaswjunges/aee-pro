@@ -9,7 +9,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "aee-pro-db"
-database_id = "local"
+database_id = "bfb6f3a4-afcd-41bb-8537-ae50e214dcbf"
 migrations_dir = "../../packages/db/migrations"
 
 # Production secrets — set with:

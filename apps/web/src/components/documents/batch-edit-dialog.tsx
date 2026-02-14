@@ -23,11 +23,13 @@ export function BatchEditDialog({
   const [instruction, setInstruction] = useState("");
   const [running, setRunning] = useState(false);
   const [editStatus, setEditStatus] = useState<EditStatus>({});
+  const [error, setError] = useState<string | null>(null);
 
   const handleClose = (value: boolean) => {
     if (running) return;
     setInstruction("");
     setEditStatus({});
+    setError(null);
     onOpenChange(value);
   };
 
@@ -54,7 +56,11 @@ export function BatchEditDialog({
         setEditStatus((prev) => ({ ...prev, [doc.id]: "completed" }));
       } else {
         setEditStatus((prev) => ({ ...prev, [doc.id]: "error" }));
+        setError(res.error || "Erro desconhecido");
         hasError = true;
+        if (res.error?.includes("Configure") || res.error?.includes("configurações")) {
+          break;
+        }
       }
     }
 
@@ -92,6 +98,12 @@ export function BatchEditDialog({
           {documents.length} {documents.length === 1 ? "documento selecionado" : "documentos selecionados"}
         </DialogDescription>
       </DialogHeader>
+
+      {error && (
+        <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive mb-4">
+          {error}
+        </div>
+      )}
 
       <div className="mb-4">
         <label className="text-sm font-medium mb-1.5 block">Instrução para a IA</label>

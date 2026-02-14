@@ -516,15 +516,15 @@ documentRoutes.get("/:id/export/docx", async (c) => {
 
 function getDefaultModel(provider: string): string {
   switch (provider) {
-    case "openai": return "gpt-4o-mini";
-    case "anthropic": return "claude-3-haiku-20240307";
+    case "openai": return "gpt-4.1-mini";
+    case "anthropic": return "claude-sonnet-4-5-20250929";
     case "gemini": return "gemini-2.0-flash";
     case "groq": return "llama-3.3-70b-versatile";
     case "deepseek": return "deepseek-chat";
     case "mistral": return "mistral-small-latest";
-    case "cohere": return "command-r";
-    case "openrouter": return "meta-llama/llama-3.3-70b-instruct";
+    case "cohere": return "command-r-plus";
+    case "openrouter": return "google/gemini-2.5-flash-preview-05-20";
     case "together": return "meta-llama/Llama-3.3-70B-Instruct-Turbo";
-    default: return "gpt-4o-mini";
+    default: return "gpt-4.1-mini";
   }
 }

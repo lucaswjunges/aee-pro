@@ -92,7 +92,12 @@ export function GenerateDialog({
         setBatchStatus((prev) => ({ ...prev, [slug]: "completed" }));
       } else {
         setBatchStatus((prev) => ({ ...prev, [slug]: "error" }));
+        setError(res.error || "Erro desconhecido");
         hasError = true;
+        // Se for erro de configuração, não tenta os próximos (mesmo erro para todos)
+        if (res.error?.includes("Configure") || res.error?.includes("configurações")) {
+          break;
+        }
       }
     }
 

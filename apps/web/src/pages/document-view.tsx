@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentEditor } from "@/components/documents/document-editor";
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 
 export function DocumentViewPage() {
   const { id, docId } = useParams<{ id: string; docId: string }>();
@@ -29,7 +29,7 @@ export function DocumentViewPage() {
     setExporting(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`/api/documents/${docId}/export/docx`, {
+      const res = await fetch(`${API_BASE}/documents/${docId}/export/docx`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!res.ok) throw new Error("Erro ao exportar");
