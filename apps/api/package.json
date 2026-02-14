@@ -1,0 +1,28 @@
+{
+  "name": "@aee-pro/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir=dist",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "migrate:local": "wrangler d1 migrations apply aee-pro-db --local"
+  },
+  "dependencies": {
+    "@aee-pro/db": "workspace:*",
+    "@aee-pro/shared": "workspace:*",
+    "docx": "^9.5.2",
+    "drizzle-orm": "^0.38.0",
+    "hono": "^4.7.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250214.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.0",
+    "wrangler": "^3.114.0"
+  }
+}

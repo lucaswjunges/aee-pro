@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types"],
+    "lib": ["ES2022"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+    "paths": {
+      "@aee-pro/shared": ["../../packages/shared/src"],
+      "@aee-pro/db": ["../../packages/db/src"],
+      "@aee-pro/db/*": ["../../packages/db/src/*"]
+    }
+  },
+  "include": ["src"]
+}

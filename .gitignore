@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+.wrangler/
+
+# Environment
+.env
+.env.*
+.dev.vars
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Build
+dist/
+build/
+
+# Logs
+*.log
+
+# Turbo
+.turbo/
+
+# Test
+coverage/
+test-results/
+playwright-report/
