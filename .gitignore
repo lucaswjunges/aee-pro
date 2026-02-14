@@ -29,3 +29,6 @@ build/
 coverage/
 test-results/
 playwright-report/
+
+# Large files (exceed GitHub 100MB limit)
+docs/referencia-janete/6.\ FORMAÇÕES\ AEE/ADAPTAÇÕES\ ESCOLARES/ADAPTAÇÃO\ ESCOLAR\ NA\ PERSPECTIVA\ DO\ AEE.pdf
