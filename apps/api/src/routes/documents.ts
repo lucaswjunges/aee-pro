@@ -392,6 +392,83 @@ documentRoutes.post("/:id/regenerate", async (c) => {
   }
 });
 
+// POST /api/documents/:id/edit-ai
+documentRoutes.post("/:id/edit-ai", async (c) => {
+  const userId = c.get("userId");
+  const id = c.req.param("id");
+  const body = await c.req.json() as { instruction: string };
+
+  if (!body.instruction?.trim()) {
+    return c.json({ success: false, error: "Instrução é obrigatória" }, 400);
+  }
+
+  const db = createDb(c.env.DB);
+
+  const doc = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.id, id), eq(documents.userId, userId)))
+    .get();
+
+  if (!doc) {
+    return c.json({ success: false, error: "Documento não encontrado" }, 404);
+  }
+
+  if (doc.status !== "completed" || !doc.content) {
+    return c.json({ success: false, error: "Documento precisa estar concluído para editar" }, 400);
+  }
+
+  const settings = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId))
+    .get();
+
+  if (!settings?.aiProvider || !settings?.aiApiKeyEncrypted) {
+    return c.json({ success: false, error: "Configure o provider de IA nas configurações" }, 400);
+  }
+
+  let apiKey: string;
+  try {
+    apiKey = await decrypt(settings.aiApiKeyEncrypted, c.env.SESSION_SECRET);
+  } catch {
+    return c.json({ success: false, error: "Erro ao descriptografar a chave de API" }, 500);
+  }
+
+  const model = settings.aiModel || getDefaultModel(settings.aiProvider);
+
+  try {
+    const provider = createAIProvider(settings.aiProvider, apiKey);
+    const result = await provider.generate({
+      model,
+      messages: [
+        {
+          role: "system",
+          content: "Você é um professor especialista em AEE. O usuário vai enviar uma instrução de edição e um documento entre tags XML. Aplique a instrução ao documento e retorne SOMENTE o documento editado. Não inclua as tags XML, a instrução, nem qualquer explicação na resposta — apenas o texto do documento editado.",
+        },
+        {
+          role: "user",
+          content: `<instrucao>${body.instruction}</instrucao>\n\n<documento>\n${doc.content}\n</documento>`,
+        },
+      ],
+      maxTokens: 2000,
+      temperature: 0.7,
+    });
+
+    const now = new Date().toISOString();
+    await db
+      .update(documents)
+      .set({ content: result.content, updatedAt: now })
+      .where(eq(documents.id, id));
+
+    const updated = await db.select().from(documents).where(eq(documents.id, id)).get();
+    return c.json({ success: true, data: updated });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Erro desconhecido";
+    return c.json({ success: false, error: `Erro na edição: ${errorMsg}` }, 500);
+  }
+});
+
 // GET /api/documents/:id/export/docx
 documentRoutes.get("/:id/export/docx", async (c) => {
   const userId = c.get("userId");

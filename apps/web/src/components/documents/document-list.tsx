@@ -7,6 +7,9 @@ interface DocumentListProps {
   onDelete: (id: string) => void;
   onRegenerate: (id: string) => void;
   regeneratingId: string | null;
+  selectionMode?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
 }
 
 export function DocumentList({
@@ -15,6 +18,9 @@ export function DocumentList({
   onDelete,
   onRegenerate,
   regeneratingId,
+  selectionMode,
+  selectedIds,
+  onToggleSelect,
 }: DocumentListProps) {
   if (documents.length === 0) {
     return (
@@ -37,6 +43,9 @@ export function DocumentList({
           onDelete={onDelete}
           onRegenerate={onRegenerate}
           regenerating={regeneratingId === doc.id}
+          selectionMode={selectionMode}
+          selected={selectedIds?.has(doc.id)}
+          onToggleSelect={() => onToggleSelect?.(doc.id)}
         />
       ))}
     </div>
