@@ -24,7 +24,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
@@ -78,6 +78,17 @@ export function LoginPage() {
           </CardFooter>
         </form>
       </Card>
+      <p className="mt-6 text-xs text-muted-foreground">
+        Desenvolvido por{" "}
+        <a
+          href="https://www.blumenauti.com.br"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary hover:underline font-medium"
+        >
+          Blumenau TI
+        </a>
+      </p>
     </div>
   );
 }
