@@ -35,6 +35,10 @@ export function sanitizeLatexSource(source: string): string {
   );
   result = result.replace(/\\pgfmathresult/g, "0");
 
+  // Layer 5: Close unclosed environments before \end{document}
+  // AI output is often truncated, leaving environments open.
+  result = closeUnclosedEnvironments(result);
+
   return result;
 }
 
@@ -121,6 +125,56 @@ function removeProblematicForeach(source: string): string {
  * - Lines with \fi (not \fill, \filbreak, etc.)
  * - Orphaned condition fragments like "\c = 1 \relax"
  */
+/**
+ * Close unclosed LaTeX environments before \end{document}.
+ *
+ * AI output is often truncated mid-generation, leaving environments like
+ * \begin{enumerate}, \begin{itemize}, \begin{atividadebox} etc. open.
+ * This causes "ended by \end{document}" errors.
+ *
+ * Strategy: scan for all \begin{X} and \end{X}, track a stack, and
+ * insert missing \end{X} in reverse order before \end{document}.
+ */
+function closeUnclosedEnvironments(source: string): string {
+  const endDocIdx = source.lastIndexOf("\\end{document}");
+  if (endDocIdx === -1) return source;
+
+  const body = source.substring(0, endDocIdx);
+  const tail = source.substring(endDocIdx);
+
+  // Match all \begin{...} and \end{...}
+  const envRegex = /\\(begin|end)\{([^}]+)\}/g;
+  const stack: string[] = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = envRegex.exec(body)) !== null) {
+    const action = m[1]; // "begin" or "end"
+    const envName = m[2]; // e.g. "enumerate", "atividadebox"
+
+    if (envName === "document") continue;
+
+    if (action === "begin") {
+      stack.push(envName);
+    } else {
+      // Pop matching open environment (search from top)
+      const idx = stack.lastIndexOf(envName);
+      if (idx !== -1) {
+        stack.splice(idx, 1);
+      }
+    }
+  }
+
+  if (stack.length === 0) return source;
+
+  // Close environments in reverse order (innermost first)
+  const closings = stack
+    .reverse()
+    .map((env) => `\\end{${env}}`)
+    .join("\n");
+
+  return body + "\n" + closings + "\n" + tail;
+}
+
 function stripTexConditionalMarkers(source: string): string {
   let result = source;
 

@@ -60,60 +60,13 @@ function extractLatexBody(raw: string): string {
 }
 
 function sanitizeTruncatedLatex(latex: string): string {
-  // If already properly closed, return as-is
-  if (latex.trimEnd().endsWith("\\end{document}")) {
-    return latex;
-  }
-
-  // Find all open environments that need closing
-  const envRegex = /\\begin\{(\w+)\}/g;
-  const endRegex = /\\end\{(\w+)\}/g;
-
-  const openStack: string[] = [];
-  let match: RegExpExecArray | null;
-
-  // Track all \begin{...}
-  const begins: Array<{ env: string; idx: number }> = [];
-  while ((match = envRegex.exec(latex)) !== null) {
-    begins.push({ env: match[1], idx: match.index });
-  }
-
-  // Track all \end{...}
-  const ends: Array<{ env: string; idx: number }> = [];
-  while ((match = endRegex.exec(latex)) !== null) {
-    ends.push({ env: match[1], idx: match.index });
-  }
-
-  // Build stack of unclosed environments
-  const allEvents = [
-    ...begins.map((b) => ({ type: "begin" as const, ...b })),
-    ...ends.map((e) => ({ type: "end" as const, ...e })),
-  ].sort((a, b) => a.idx - b.idx);
-
-  for (const event of allEvents) {
-    if (event.type === "begin") {
-      openStack.push(event.env);
-    } else if (event.type === "end") {
-      // Close the most recent matching open
-      const lastIdx = openStack.lastIndexOf(event.env);
-      if (lastIdx !== -1) {
-        openStack.splice(lastIdx, 1);
-      }
-    }
-  }
-
-  // Close environments in reverse order (innermost first)
+  // Ensure \end{document} exists
   let result = latex;
-  for (let i = openStack.length - 1; i >= 0; i--) {
-    const env = openStack[i];
-    if (env === "document") continue; // We'll add \end{document} at the end
-    result += `\n\\end{${env}}`;
-  }
-
   if (!result.trimEnd().endsWith("\\end{document}")) {
     result += "\n\\end{document}";
   }
-
+  // The heavy lifting (closing unclosed environments) is now handled
+  // by sanitizeLatexSource → closeUnclosedEnvironments
   return result;
 }
 
@@ -452,10 +405,11 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
     }
   }
 
-  // Fallback: compile without auto-fix
+  // Fallback: compile without auto-fix (still sanitize)
   if (!compileResult) {
-    const raw = await compileLatex(doc.latexSource, c.env.LATEX_COMPILER_URL, c.env.LATEX_COMPILER_TOKEN);
-    compileResult = { ...raw, latexSource: doc.latexSource, attempts: 1 };
+    const sanitized = sanitizeLatexSource(doc.latexSource);
+    const raw = await compileLatex(sanitized, c.env.LATEX_COMPILER_URL, c.env.LATEX_COMPILER_TOKEN);
+    compileResult = { ...raw, latexSource: sanitized, attempts: 1 };
   }
 
   if (compileResult.success && compileResult.pdfBase64) {
