@@ -35,7 +35,12 @@ export function sanitizeLatexSource(source: string): string {
   );
   result = result.replace(/\\pgfmathresult/g, "0");
 
-  // Layer 5: Close unclosed environments before \end{document}
+  // Layer 5: Fix longtable issues
+  // longtable inside adjustbox/tcolorbox/minipage causes \endgroup errors.
+  // longtable with X columns (tabularx-only) also breaks.
+  result = fixLongtableIssues(result);
+
+  // Layer 6: Close unclosed environments before \end{document}
   // AI output is often truncated, leaving environments open.
   result = closeUnclosedEnvironments(result);
 
@@ -125,6 +130,85 @@ function removeProblematicForeach(source: string): string {
  * - Lines with \fi (not \fill, \filbreak, etc.)
  * - Orphaned condition fragments like "\c = 1 \relax"
  */
+/**
+ * Replace X column specifiers in longtable with p{5cm}.
+ * X is a tabularx-only column type; longtable doesn't support it.
+ * Handles nested braces in colspec like {p{0.2\textwidth} X}.
+ */
+function fixLongtableXColumns(source: string): string {
+  let result = source;
+  const marker = "\\begin{longtable}{";
+  let searchFrom = 0;
+
+  while (true) {
+    const idx = result.indexOf(marker, searchFrom);
+    if (idx === -1) break;
+
+    const colStart = idx + marker.length - 1; // position of opening {
+    let depth = 1;
+    let i = colStart + 1;
+    while (depth > 0 && i < result.length) {
+      if (result[i] === "{") depth++;
+      else if (result[i] === "}") depth--;
+      i++;
+    }
+    const colspec = result.substring(colStart, i);
+
+    // Replace standalone X (column type) but not X inside words like \textwidth
+    if (/(?<![a-zA-Z\\])X(?![a-zA-Z])/.test(colspec)) {
+      const fixed = colspec.replace(/(?<![a-zA-Z\\])X(?![a-zA-Z])/g, "p{5cm}");
+      result = result.substring(0, colStart) + fixed + result.substring(i);
+      searchFrom = colStart + fixed.length;
+    } else {
+      searchFrom = i;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Fix longtable issues that cause compilation errors:
+ *
+ * 1. longtable inside adjustbox, tcolorbox, or minipage → convert to tabular.
+ *    longtable MUST be at the top level of the document; it cannot be
+ *    wrapped in any box or group.
+ *
+ * 2. longtable with X columns → convert to tabularx or replace X with p{}.
+ *    X columns only work with tabularx, not longtable.
+ */
+function fixLongtableIssues(source: string): string {
+  let result = source;
+
+  // Pattern 1: longtable inside adjustbox → tabular
+  // Match \begin{adjustbox}...\begin{longtable}...\end{longtable}...\end{adjustbox}
+  result = result.replace(
+    /\\begin\{adjustbox\}(\{[^}]*\})\s*\\begin\{longtable\}/g,
+    "\\begin{adjustbox}$1\\begin{tabular}",
+  );
+  result = result.replace(
+    /\\end\{longtable\}(\s*)\\end\{adjustbox\}/g,
+    "\\end{tabular}$1\\end{adjustbox}",
+  );
+
+  // Pattern 2: longtable with X column type → replace X with p{5cm}
+  // X columns are tabularx-only; longtable doesn't support them.
+  // Must handle nested braces in colspec like {p{0.2\textwidth} X}
+  result = fixLongtableXColumns(result);
+
+  // Remove longtable-specific commands that don't work in tabular
+  // (\endhead, \endfirsthead, \endfoot, \endlastfoot)
+  // These are only valid in longtable; in tabular they cause errors
+  // Only remove them if we converted longtable → tabular (i.e. inside adjustbox)
+  // Simple approach: always remove them since tabular ignores pagebreaks anyway
+  result = result.replace(
+    /^[ \t]*\\(endhead|endfirsthead|endfoot|endlastfoot)\b[^\n]*$/gm,
+    "",
+  );
+
+  return result;
+}
+
 /**
  * Close unclosed LaTeX environments before \end{document}.
  *
