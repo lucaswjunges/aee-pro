@@ -59,6 +59,28 @@ function extractLatexBody(raw: string): string {
   return body;
 }
 
+/**
+ * Check if the LaTeX body has meaningful content (not just empty section headers).
+ * Returns null if OK, or an error message if content is too thin.
+ */
+function checkContentQuality(body: string): string | null {
+  // Strip LaTeX commands, environments, and whitespace to get "actual text"
+  const textOnly = body
+    .replace(/\\begin\{document\}/g, "")
+    .replace(/\\end\{document\}/g, "")
+    .replace(/\\(section|subsection|subsubsection|paragraph)\*?\{[^}]*\}/g, "")
+    .replace(/\\(begin|end)\{[^}]*\}(\[[^\]]*\])?(\{[^}]*\})?/g, "")
+    .replace(/\\[a-zA-Z]+(\{[^}]*\})?/g, "")
+    .replace(/[{}\\%&$#_\[\]]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (textOnly.length < 200) {
+    return `A IA gerou um documento quase vazio (apenas ${textOnly.length} caracteres de conteúdo). O modelo escolhido pode não ser capaz de gerar documentos LaTeX complexos. Tente usar um modelo mais capaz (Claude, GPT-4, Gemini).`;
+  }
+  return null;
+}
+
 function sanitizeTruncatedLatex(latex: string): string {
   // Ensure \end{document} exists
   let result = latex;
@@ -181,6 +203,17 @@ latexDocumentRoutes.post("/generate", async (c) => {
       });
 
       const body_latex = extractLatexBody(result.content);
+
+      // Quality check: reject near-empty content
+      const qualityError = checkContentQuality(body_latex);
+      if (qualityError) {
+        await db
+          .update(latexDocuments)
+          .set({ status: "error", lastCompilationError: qualityError, updatedAt: new Date().toISOString() })
+          .where(eq(latexDocuments.id, docId));
+        return;
+      }
+
       const preamble = getLatexPreamble({
         documentTitle: typeName,
         studentName: student.name,
@@ -736,6 +769,17 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
       });
 
       const bodyLatex = extractLatexBody(result.content);
+
+      // Quality check: reject near-empty content
+      const qualityError = checkContentQuality(bodyLatex);
+      if (qualityError) {
+        await db
+          .update(latexDocuments)
+          .set({ status: "error", lastCompilationError: qualityError, updatedAt: new Date().toISOString() })
+          .where(eq(latexDocuments.id, newDocId));
+        return;
+      }
+
       const preamble = getLatexPreamble({
         documentTitle: typeName,
         studentName: student.name,
