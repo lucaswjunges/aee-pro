@@ -17,7 +17,7 @@ export function getLatexModel(provider: string): string {
     case "mistral":
       return "mistral-large-latest";
     case "openrouter":
-      return "anthropic/claude-sonnet-4-5-20250929";
+      return "openai/gpt-4.1-mini";
     case "together":
       return "meta-llama/Llama-3.3-70B-Instruct-Turbo";
     case "cohere":

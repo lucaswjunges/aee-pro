@@ -883,7 +883,7 @@ function getDefaultModel(provider: string): string {
     case "deepseek": return "deepseek-chat";
     case "mistral": return "mistral-small-latest";
     case "cohere": return "command-r-plus";
-    case "openrouter": return "google/gemini-2.5-flash-preview-05-20";
+    case "openrouter": return "openai/gpt-4.1-mini";
     case "together": return "meta-llama/Llama-3.3-70B-Instruct-Turbo";
     default: return "gpt-4.1-mini";
   }
