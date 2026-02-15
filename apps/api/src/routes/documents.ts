@@ -828,8 +828,9 @@ function buildSimplePdfLatex(
   bodyLines.push("\\end{center}");
   bodyLines.push("\\vspace{0.5cm}");
 
-  for (const line of lines) {
-    const trimmed = line.trim();
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    const nextTrimmed = (lines[i + 1] ?? "").trim();
 
     if (!trimmed) {
       bodyLines.push("");
@@ -845,12 +846,15 @@ function buildSimplePdfLatex(
     } else if (h1Match) {
       bodyLines.push(`\\subsection*{${escapeAndBold(h1Match[1])}}`);
     } else if (/^\*\*(.+?)\*\*$/.test(trimmed)) {
-      // Full bold line
+      // Full bold line — standalone paragraph (no \\)
       const inner = trimmed.match(/^\*\*(.+?)\*\*$/)![1];
-      bodyLines.push(`\\textbf{${escapeLatex(inner)}}\\\\`);
+      bodyLines.push(`\n\\textbf{${escapeLatex(inner)}}\n`);
     } else {
       // Regular line with inline **bold** support
-      bodyLines.push(escapeAndBold(trimmed) + "\\\\");
+      // Only add \\ if next line is also non-empty (line break within paragraph)
+      // Don't add \\ before blank lines — causes "no line to end" error
+      const suffix = nextTrimmed ? " \\\\" : "";
+      bodyLines.push(escapeAndBold(trimmed) + suffix);
     }
   }
 
