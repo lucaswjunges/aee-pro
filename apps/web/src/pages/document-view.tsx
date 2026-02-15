@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Pencil, Eye, FileDown, Printer, Loader2 } from "lucide-react";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, Pencil, Eye, FileDown, Printer, Loader2, Download, FileCode } from "lucide-react";
 import type { Document } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,10 +12,13 @@ import { VOCE_SABIA } from "@/lib/voce-sabia";
 
 export function DocumentViewPage() {
   const { id, docId } = useParams<{ id: string; docId: string }>();
+  const navigate = useNavigate();
   const [document, setDocument] = useState<Document | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [converting, setConverting] = useState(false);
   const voceSabia = useMemo(() => VOCE_SABIA[Math.floor(Math.random() * VOCE_SABIA.length)], []);
 
   useEffect(() => {
@@ -50,6 +53,44 @@ export function DocumentViewPage() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleExportPdf = async () => {
+    if (!docId) return;
+    setExportingPdf(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/documents/${docId}/export/pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Erro ao gerar PDF");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = window.document.createElement("a");
+      a.href = url;
+      a.download = `${document?.title ?? "documento"}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Erro ao gerar PDF. Verifique se o compilador LaTeX está disponível.");
+    }
+    setExportingPdf(false);
+  };
+
+  const handleConvertToLatex = async () => {
+    if (!docId || !id) return;
+    setConverting(true);
+    try {
+      const res = await api.post<{ id: string; studentId: string }>(`/documents/${docId}/convert-to-latex`, {});
+      if (res.success && res.data) {
+        navigate(`/alunos/${id}/documentos-latex/${res.data.id}`);
+      } else {
+        alert(res.error ?? "Erro ao converter para LaTeX");
+      }
+    } catch {
+      alert("Erro ao converter para LaTeX");
+    }
+    setConverting(false);
   };
 
   if (loading) {
@@ -114,6 +155,19 @@ export function DocumentViewPage() {
           <Button
             variant="outline"
             size="sm"
+            onClick={handleExportPdf}
+            disabled={exportingPdf}
+          >
+            {exportingPdf ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4 mr-1" />
+            )}
+            {exportingPdf ? "Gerando..." : "PDF"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleExportDocx}
             disabled={exporting}
           >
@@ -140,6 +194,19 @@ export function DocumentViewPage() {
                 Editar
               </>
             )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleConvertToLatex}
+            disabled={converting}
+          >
+            {converting ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <FileCode className="h-4 w-4 mr-1" />
+            )}
+            {converting ? "Convertendo..." : "Converter para LaTeX"}
           </Button>
         </div>
       )}

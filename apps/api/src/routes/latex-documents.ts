@@ -144,7 +144,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
   // Create record
   const now = new Date().toISOString();
   const docId = crypto.randomUUID();
-  const model = getLatexModel(settings.aiProvider);
+  const model = settings.aiModel || getLatexModel(settings.aiProvider);
   const typeName = LATEX_DOCUMENT_TYPES.find((t) => t.slug === body.documentType)?.name ?? typeConfig.name;
 
   await db.insert(latexDocuments).values({
@@ -393,7 +393,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
 
     if (apiKey) {
       const provider = createAIProvider(settings.aiProvider, apiKey);
-      const model = getLatexModel(settings.aiProvider);
+      const model = settings.aiModel || getLatexModel(settings.aiProvider);
       compileResult = await compileWithAutoFix(
         doc.latexSource,
         c.env.LATEX_COMPILER_URL,
@@ -491,7 +491,7 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
   const preamblePart = startIdx !== -1 ? doc.latexSource.substring(0, startIdx) : "";
   const bodyPart = startIdx !== -1 ? doc.latexSource.substring(startIdx) : doc.latexSource;
 
-  const model = getLatexModel(settings.aiProvider);
+  const model = settings.aiModel || getLatexModel(settings.aiProvider);
   const provider = createAIProvider(settings.aiProvider, apiKey);
 
   try {
@@ -699,7 +699,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
 
   const now = new Date().toISOString();
   const newDocId = crypto.randomUUID();
-  const model = getLatexModel(settings.aiProvider);
+  const model = settings.aiModel || getLatexModel(settings.aiProvider);
   const typeName = LATEX_DOCUMENT_TYPES.find((t) => t.slug === doc.documentType)?.name ?? typeConfig.name;
 
   await db.insert(latexDocuments).values({
