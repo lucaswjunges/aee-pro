@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Pencil, Eye, FileDown, Printer } from "lucide-react";
+import { ArrowLeft, Pencil, Eye, FileDown, Printer, Loader2 } from "lucide-react";
 import type { Document } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentEditor } from "@/components/documents/document-editor";
 import { api, API_BASE } from "@/lib/api";
+import { VOCE_SABIA } from "@/lib/voce-sabia";
 
 export function DocumentViewPage() {
   const { id, docId } = useParams<{ id: string; docId: string }>();
@@ -15,6 +16,7 @@ export function DocumentViewPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const voceSabia = useMemo(() => VOCE_SABIA[Math.floor(Math.random() * VOCE_SABIA.length)], []);
 
   useEffect(() => {
     if (!docId) return;
@@ -187,8 +189,13 @@ export function DocumentViewPage() {
 
       {document.status === "generating" && (
         <div className="text-center py-12 text-muted-foreground print:hidden">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3" />
           <p className="text-lg">Documento sendo gerado...</p>
           <p className="mt-2">Aguarde alguns instantes e recarregue a página.</p>
+          <div className="mt-6 mx-auto max-w-md rounded-lg border bg-muted/50 p-4 text-left">
+            <p className="text-xs font-semibold text-foreground mb-1">Você sabia?</p>
+            <p className="text-xs leading-relaxed">{voceSabia}</p>
+          </div>
         </div>
       )}
     </div>
