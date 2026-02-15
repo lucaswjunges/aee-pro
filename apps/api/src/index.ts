@@ -6,11 +6,15 @@ import { settingsRoutes } from "./routes/settings";
 import { documentRoutes } from "./routes/documents";
 import { promptRoutes } from "./routes/prompts";
 import { dashboardRoutes } from "./routes/dashboard";
+import { latexDocumentRoutes } from "./routes/latex-documents";
 
 export type Env = {
   Bindings: {
     DB: D1Database;
+    R2: R2Bucket;
     SESSION_SECRET: string;
+    LATEX_COMPILER_URL: string;
+    LATEX_COMPILER_TOKEN: string;
   };
 };
 
@@ -35,5 +39,6 @@ app.route("/api/settings", settingsRoutes);
 app.route("/api/documents", documentRoutes);
 app.route("/api/prompts", promptRoutes);
 app.route("/api/dashboard", dashboardRoutes);
+app.route("/api/latex-documents", latexDocumentRoutes);
 
 export default app;

@@ -1,0 +1,20 @@
+CREATE TABLE `latex_documents` (
+  `id` text PRIMARY KEY NOT NULL,
+  `user_id` text NOT NULL REFERENCES `users`(`id`) ON DELETE CASCADE,
+  `student_id` text NOT NULL REFERENCES `students`(`id`) ON DELETE CASCADE,
+  `document_type` text NOT NULL,
+  `title` text NOT NULL,
+  `latex_source` text,
+  `pdf_r2_key` text,
+  `pdf_size_bytes` integer,
+  `status` text NOT NULL DEFAULT 'generating',
+  `heat_level` integer NOT NULL DEFAULT 3,
+  `size_level` integer NOT NULL DEFAULT 3,
+  `ai_provider` text,
+  `ai_model` text,
+  `compilation_attempts` integer DEFAULT 0,
+  `last_compilation_error` text,
+  `generated_at` text,
+  `created_at` text NOT NULL,
+  `updated_at` text NOT NULL
+);

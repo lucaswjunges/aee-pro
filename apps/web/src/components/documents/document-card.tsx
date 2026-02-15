@@ -33,6 +33,7 @@ export function DocumentCard({
   onToggleSelect,
 }: DocumentCardProps) {
   const status = statusConfig[document.status] ?? statusConfig.error;
+  const isBusy = regenerating || document.status === "generating";
   const isSelectable = selectionMode && document.status === "completed";
 
   const formattedDate = document.generatedAt
@@ -83,10 +84,10 @@ export function DocumentCard({
             variant="ghost"
             size="icon"
             onClick={() => onRegenerate(document.id)}
-            disabled={regenerating}
+            disabled={isBusy}
             title="Regenerar"
           >
-            {regenerating ? (
+            {isBusy ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="h-4 w-4" />

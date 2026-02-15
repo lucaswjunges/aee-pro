@@ -12,7 +12,13 @@ database_name = "aee-pro-db"
 database_id = "bfb6f3a4-afcd-41bb-8537-ae50e214dcbf"
 migrations_dir = "../../packages/db/migrations"
 
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "aee-pro-documents"
+
 # Production secrets — set with:
 #   wrangler secret put SESSION_SECRET
+#   wrangler secret put LATEX_COMPILER_URL
+#   wrangler secret put LATEX_COMPILER_TOKEN
 # [vars]
 # SESSION_SECRET is set via `wrangler secret put` (never in this file)

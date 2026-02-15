@@ -9,6 +9,8 @@ import { StudentNewPage } from "@/pages/student-new";
 import { StudentEditPage } from "@/pages/student-edit";
 import { StudentDocumentsPage } from "@/pages/student-documents";
 import { DocumentViewPage } from "@/pages/document-view";
+import { LatexDocumentsPage } from "@/pages/latex-documents";
+import { LatexDocumentViewPage } from "@/pages/latex-document-view";
 import { SettingsPage } from "@/pages/settings";
 import { PromptsPage } from "@/pages/prompts";
 import { PrivacyPage } from "@/pages/privacy";
@@ -60,6 +62,8 @@ export function AppRouter() {
         <Route path="alunos/:id/editar" element={<StudentEditPage />} />
         <Route path="alunos/:id/documentos" element={<StudentDocumentsPage />} />
         <Route path="alunos/:id/documentos/:docId" element={<DocumentViewPage />} />
+        <Route path="alunos/:id/documentos-latex" element={<LatexDocumentsPage />} />
+        <Route path="alunos/:id/documentos-latex/:docId" element={<LatexDocumentViewPage />} />
         <Route path="prompts" element={<PromptsPage />} />
         <Route path="configuracoes" element={<SettingsPage />} />
       </Route>
