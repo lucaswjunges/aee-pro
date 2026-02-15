@@ -36,10 +36,22 @@ export function detectTruncation(source: string): string | null {
     return `Ambientes não fechados antes de \\end{document}: ${stack.join(", ")}. O conteúdo dentro desses ambientes parece ter sido cortado no meio.`;
   }
 
-  // Check if text ends abruptly (sentence cut mid-word before \end{document})
-  const lastContent = body.substring(body.lastIndexOf("\n", endDocIdx - 50)).trim();
-  if (lastContent && !/[.!?}\])]$/.test(lastContent)) {
-    return "Texto cortado no meio de uma frase antes do final do documento.";
+  // Find the last line of ACTUAL content (skip \end{...}, blank lines, \vfill, etc.)
+  const lines = body.split("\n");
+  let lastContentLine = "";
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    if (/^\\end\{/.test(trimmed)) continue;
+    if (/^\\(vfill|vspace|newpage|clearpage|pagebreak)\b/.test(trimmed)) continue;
+    lastContentLine = trimmed;
+    break;
+  }
+
+  // Check if last content line ends mid-sentence
+  // Good endings: . ! ? } ] ) or LaTeX commands like \\ or \hline
+  if (lastContentLine && !/[.!?}\])]$/.test(lastContentLine) && !/\\\\$/.test(lastContentLine) && !/\\(hline|cline|bottomrule|midrule|toprule)\b/.test(lastContentLine)) {
+    return `Texto cortado no meio de uma frase: "${lastContentLine.substring(Math.max(0, lastContentLine.length - 60))}"`;
   }
 
   return null;
