@@ -116,6 +116,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 \\usepackage[most]{tcolorbox}
 
 \\newtcolorbox{infobox}[1][]{
+  enhanced, breakable,
   colback=aeelightblue,
   colframe=aeeblue,
   coltitle=white,
@@ -129,6 +130,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 }
 
 \\newtcolorbox{alertbox}[1][]{
+  enhanced, breakable,
   colback=aeered!5,
   colframe=aeered!70,
   coltitle=white,
@@ -141,6 +143,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 }
 
 \\newtcolorbox{successbox}[1][]{
+  enhanced, breakable,
   colback=aeegreen!5,
   colframe=aeegreen!70,
   coltitle=white,
@@ -153,6 +156,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 }
 
 \\newtcolorbox{datacard}{
+  enhanced, breakable,
   colback=aeegray,
   colframe=aeeblue!30,
   rounded corners,
@@ -162,7 +166,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 }
 
 \\newtcolorbox{atividadebox}[2][]{
-  enhanced,
+  enhanced, breakable,
   colback=#1!5,
   colframe=#1!60,
   coltitle=white,
@@ -178,7 +182,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 }
 
 \\newtcolorbox{dicabox}[1][]{
-  enhanced,
+  enhanced, breakable,
   colback=lightyellow,
   colframe=aeegold!70,
   coltitle=aeeblue,
@@ -191,7 +195,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 }
 
 \\newtcolorbox{materialbox}{
-  enhanced,
+  enhanced, breakable,
   colback=aeegray,
   colframe=aeeblue!20,
   rounded corners,
@@ -201,7 +205,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 }
 
 \\newtcolorbox{sessaobox}[1][]{
-  enhanced,
+  enhanced, breakable,
   colback=white,
   colframe=aeeblue,
   coltitle=white,

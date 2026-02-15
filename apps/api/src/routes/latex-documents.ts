@@ -11,6 +11,7 @@ import { getLatexModel } from "../lib/latex/model-selection";
 import { getDocumentTypeConfig } from "../lib/latex/document-types";
 import { compileLatex } from "../lib/latex/compiler-client";
 import { compileWithAutoFix } from "../lib/latex/auto-fix";
+import { sanitizeLatexSource } from "../lib/latex/sanitizer";
 import { LATEX_DOCUMENT_TYPES, SIZE_LEVELS } from "@aee-pro/shared";
 import type { Env } from "../index";
 
@@ -51,6 +52,9 @@ function extractLatexBody(raw: string): string {
 
   // Sanitize truncated documents: close any open environments
   body = sanitizeTruncatedLatex(body);
+
+  // Strip problematic TeX constructs (\ifnum, \ifdim, etc.)
+  body = sanitizeLatexSource(body);
 
   return body;
 }

@@ -1,5 +1,5 @@
-import { Link } from "react-router-dom";
-import { Pencil, Trash2, FileText } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { Pencil, Trash2 } from "lucide-react";
 import type { Student } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,6 +10,8 @@ interface StudentListProps {
 }
 
 export function StudentList({ students, onDelete }: StudentListProps) {
+  const navigate = useNavigate();
+
   if (students.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground">
@@ -26,11 +28,15 @@ export function StudentList({ students, onDelete }: StudentListProps) {
   return (
     <div className="grid gap-3">
       {students.map((student) => (
-        <Card key={student.id}>
-          <CardContent className="flex items-center justify-between p-4">
+        <Card
+          key={student.id}
+          className="cursor-pointer hover:bg-accent/50 transition-colors"
+          onClick={() => navigate(`/alunos/${student.id}/documentos`)}
+        >
+          <CardContent className="flex items-center justify-between gap-2 p-3 sm:p-4">
             <div className="min-w-0 flex-1">
               <p className="font-medium truncate">{student.name}</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground truncate">
                 {[student.grade, student.school, student.shift]
                   .filter(Boolean)
                   .join(" - ") || "Sem detalhes"}
@@ -41,13 +47,8 @@ export function StudentList({ students, onDelete }: StudentListProps) {
                 </p>
               )}
             </div>
-            <div className="flex gap-1 ml-4 shrink-0">
-              <Button variant="ghost" size="icon" asChild title="Documentos">
-                <Link to={`/alunos/${student.id}/documentos`}>
-                  <FileText className="h-4 w-4" />
-                </Link>
-              </Button>
-              <Button variant="ghost" size="icon" asChild title="Editar">
+            <div className="flex gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <Button variant="ghost" size="icon" className="h-8 w-8" asChild title="Editar">
                 <Link to={`/alunos/${student.id}/editar`}>
                   <Pencil className="h-4 w-4" />
                 </Link>
@@ -55,6 +56,7 @@ export function StudentList({ students, onDelete }: StudentListProps) {
               <Button
                 variant="ghost"
                 size="icon"
+                className="h-8 w-8"
                 title="Excluir"
                 onClick={() => {
                   if (window.confirm(`Tem certeza que deseja excluir ${student.name}?`)) {

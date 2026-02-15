@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -23,6 +23,30 @@ import { api, API_BASE } from "@/lib/api";
 
 type ViewMode = "pdf" | "code" | "chat";
 
+const VOCE_SABIA = [
+  "O AEE foi instituído pela Política Nacional de Educação Especial na Perspectiva da Educação Inclusiva (2008) e é um direito garantido pela Constituição Federal.",
+  "O PDI (Plano de Desenvolvimento Individual) é um dos documentos mais importantes do AEE — ele norteia todo o trabalho pedagógico com o aluno.",
+  "O AEE+ PRO gera documentos usando LaTeX, o mesmo sistema de formatação usado em artigos científicos e teses de doutorado.",
+  "A Sala de Recursos Multifuncionais (SRM) é o espaço onde o AEE acontece, com atendimento no contraturno da escolarização regular.",
+  "O Estudo de Caso no AEE é fundamental para compreender o aluno de forma integral: aspectos cognitivos, motores, sociais e emocionais.",
+  "Cada documento gerado pelo AEE+ PRO é único — a IA considera todos os dados individuais do aluno para personalizar o conteúdo.",
+  "A anamnese no AEE vai muito além do diagnóstico clínico: ela investiga a história de vida, rotina familiar e potencialidades do aluno.",
+  "O AEE não substitui a escolarização regular — ele complementa e suplementa a formação do aluno com atividades específicas.",
+  "O professor de AEE precisa produzir em média 14 tipos diferentes de documentos por aluno ao longo do ano letivo.",
+  "O AEE+ PRO protege os dados dos alunos seguindo a LGPD (Lei 13.709/2018), especialmente os artigos 11 e 14 sobre dados de menores.",
+  "As adaptações curriculares são direito do aluno público-alvo da educação especial, conforme a LBI (Lei 13.146/2015).",
+  "O AEE atende alunos com deficiência, transtornos globais do desenvolvimento e altas habilidades/superdotação.",
+  "Um professor de AEE pode atender dezenas de alunos — o AEE+ PRO ajuda a reduzir horas de trabalho burocrático em minutos.",
+  "O Parecer Descritivo no AEE registra os avanços e desafios do aluno, sendo essencial para a continuidade pedagógica.",
+  "O AEE+ PRO permite escolher o nível de detalhamento visual dos documentos, de conservador (texto puro) até máximo (gráficos e diagramas).",
+  "A Rotina Visual é uma ferramenta poderosa para alunos com TEA, ajudando na previsibilidade e redução da ansiedade.",
+  "O Diário de Bordo do AEE registra cada sessão de atendimento, construindo um histórico valioso do desenvolvimento do aluno.",
+  "Segundo o Censo Escolar 2023, o Brasil tem mais de 1,5 milhão de alunos da educação especial matriculados em classes comuns.",
+  "O AEE+ PRO usa inteligência artificial de última geração para gerar documentos que parecem escritos por um especialista humano.",
+  "A articulação entre professor de AEE e professor da sala regular é fundamental — o Relatório para Professor facilita essa comunicação.",
+];
+
+
 export function LatexDocumentViewPage() {
   const { id, docId } = useParams<{ id: string; docId: string }>();
   const [document, setDocument] = useState<LatexDocument | null>(null);
@@ -31,6 +55,7 @@ export function LatexDocumentViewPage() {
   const [editedSource, setEditedSource] = useState("");
   const [recompiling, setRecompiling] = useState(false);
   const [saving, setSaving] = useState(false);
+  const voceSabia = useMemo(() => VOCE_SABIA[Math.floor(Math.random() * VOCE_SABIA.length)], []);
 
   const fetchDocument = async () => {
     if (!docId) return;
@@ -277,6 +302,10 @@ export function LatexDocumentViewPage() {
             {document.status === "generating" ? "Gerando documento..." : "Compilando LaTeX..."}
           </p>
           <p className="mt-2">Aguarde alguns instantes e recarregue a página.</p>
+          <div className="mt-6 mx-auto max-w-md rounded-lg border bg-muted/50 p-4 text-left">
+            <p className="text-xs font-semibold text-foreground mb-1">Você sabia?</p>
+            <p className="text-xs leading-relaxed">{voceSabia}</p>
+          </div>
         </div>
       )}
 

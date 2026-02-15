@@ -1,5 +1,6 @@
 import type { AIProvider } from "../../lib/ai/types";
 import { compileLatex, type CompileResult } from "./compiler-client";
+import { sanitizeLatexSource } from "./sanitizer";
 
 const MAX_FIX_ATTEMPTS = 3;
 const MAX_REFINE_PASSES = 3;
@@ -259,9 +260,13 @@ function extractLatexBody(content: string): string | null {
   if (startIdx === -1) return null;
 
   const endIdx = cleaned.lastIndexOf("\\end{document}");
+  let body: string;
   if (endIdx === -1) {
-    return cleaned.substring(startIdx) + "\n\\end{document}";
+    body = cleaned.substring(startIdx) + "\n\\end{document}";
+  } else {
+    body = cleaned.substring(startIdx, endIdx + "\\end{document}".length);
   }
 
-  return cleaned.substring(startIdx, endIdx + "\\end{document}".length);
+  // Strip problematic TeX constructs (\ifnum, \ifdim, etc.)
+  return sanitizeLatexSource(body);
 }

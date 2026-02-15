@@ -239,9 +239,9 @@ REGRAS CRÍTICAS:
 13. Para multirow com texto longo, use \\multirow{N}{*}{texto} e NUNCA \\multirowcell.
 14. Em TikZ: use valores de coordenadas PEQUENOS (max 100). Dimensões muito grandes causam "Dimension too large".
 15. TABELAS DEVEM CABER NA PÁGINA: use tabularx com largura \\textwidth e colunas X (auto-ajuste). Para tabelas com muitas colunas, envolva em \\adjustbox{max width=\\textwidth}{...}. NUNCA use colunas l/c/r para texto longo — use p{Xcm} ou X.
-16. Para tcolorbox longas que podem ultrapassar a página, adicione a opção breakable: \\begin{infobox}[breakable, Título]...
+16. Todas as tcolorbox já são breakable por padrão — NÃO adicione breakable manualmente. O argumento opcional é SOMENTE o título: \\begin{infobox}[Meu Título].
 17. Texto dentro de células de tabela DEVE ser curto. Se precisar de texto longo, use colunas p{} ou X com largura proporcional.
-18. Em TikZ: NÃO use \\ifnum, \\foreach com condicionais complexos, nem \\pgfmathparse inline em especificações de cor. Mantenha capas TikZ simples: retângulos coloridos, nodes com texto, linhas decorativas. Evite aleatoriedade (rnd) e condicionais.
+18. PROIBIDO (causa erro fatal): NÃO use condicionais TeX: \\ifnum, \\ifdim, \\ifx, \\ifodd, \\ifcase, \\or, \\else, \\fi. NÃO use \\foreach com rnd (aleatoriedade) — círculos decorativos aleatórios SEMPRE falham. NÃO use \\pgfmathparse inline em especificações de cor (ex: \\fill[cor!\\pgfmathresult!white]). Para capas TikZ: use APENAS retângulos coloridos fixos, nodes com texto, linhas decorativas. Cores devem ser literais (aeeblue, aeegold), NUNCA calculadas.
 
 ${AVAILABLE_LATEX_REFERENCE}
 
