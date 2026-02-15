@@ -28,7 +28,13 @@ export function sanitizeLatexSource(source: string): string {
     "\\begin{$1}[",
   );
 
-  // Layer 4: Replace \pgfmathparse...\pgfmathresult inline color specs
+  // Layer 4: Remove tikzpicture blocks containing pgfplots \begin{axis}
+  // The AI generates radar charts, bar charts, etc. using pgfplots options
+  // (radar M, axis lines, etc.) that often depend on unavailable packages
+  // or contain blank lines inside axis (causing "Paragraph ended" errors).
+  result = removePgfplotsBlocks(result);
+
+  // Layer 5: Replace \pgfmathparse...\pgfmathresult inline color specs
   result = result.replace(
     /\\pgfmathparse\{[^}]*\}\\pgfmathresult/g,
     "black",
@@ -130,6 +136,62 @@ function removeProblematicForeach(source: string): string {
  * - Lines with \fi (not \fill, \filbreak, etc.)
  * - Orphaned condition fragments like "\c = 1 \relax"
  */
+/**
+ * Remove tikzpicture blocks that contain pgfplots \begin{axis}.
+ *
+ * The AI generates charts (radar, bar, etc.) using pgfplots that often:
+ * - Use unavailable packages/options (radar M, spider web, etc.)
+ * - Contain blank lines inside axis environments ("Paragraph ended" error)
+ * - Depend on data that doesn't exist
+ *
+ * These are always decorative — removing them doesn't lose document content.
+ */
+function removePgfplotsBlocks(source: string): string {
+  let result = source;
+  const beginTag = "\\begin{tikzpicture}";
+  const endTag = "\\end{tikzpicture}";
+  let cursor = 0;
+  let safety = 0;
+
+  while (safety++ < 20) {
+    const startIdx = result.indexOf(beginTag, cursor);
+    if (startIdx === -1) break;
+
+    // Find matching \end{tikzpicture} handling nesting
+    let depth = 1;
+    let endIdx = startIdx + beginTag.length;
+
+    while (depth > 0 && endIdx < result.length) {
+      const nextBegin = result.indexOf(beginTag, endIdx);
+      const nextEnd = result.indexOf(endTag, endIdx);
+
+      if (nextEnd === -1) break;
+
+      if (nextBegin !== -1 && nextBegin < nextEnd) {
+        depth++;
+        endIdx = nextBegin + beginTag.length;
+      } else {
+        depth--;
+        endIdx = nextEnd + endTag.length;
+      }
+    }
+
+    const block = result.substring(startIdx, endIdx);
+
+    if (block.includes("\\begin{axis}")) {
+      // Remove entire tikzpicture block with pgfplots axis
+      const lineStart = result.lastIndexOf("\n", startIdx) + 1;
+      const lineEnd = endIdx < result.length && result[endIdx] === "\n" ? endIdx + 1 : endIdx;
+      result = result.substring(0, lineStart) + result.substring(lineEnd);
+      cursor = lineStart; // re-scan from same position
+    } else {
+      cursor = endIdx; // skip past this safe tikzpicture
+    }
+  }
+
+  return result;
+}
+
 /**
  * Replace X column specifiers in longtable with p{5cm}.
  * X is a tabularx-only column type; longtable doesn't support it.
