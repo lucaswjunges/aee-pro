@@ -74,11 +74,13 @@ export function LatexDocumentViewPage() {
   };
 
   const handleRecompile = async () => {
-    if (!docId) return;
+    if (!docId || !document) return;
     // Save first if source changed
-    if (editedSource !== document?.latexSource) {
+    if (editedSource !== document.latexSource) {
       await api.put(`/latex-documents/${docId}`, { latexSource: editedSource });
     }
+    // Optimistic update: show "compiling" immediately
+    setDocument({ ...document, status: "compiling" });
     setRecompiling(true);
     const res = await api.post<LatexDocument>(`/latex-documents/${docId}/recompile`, {});
     if (res.success && res.data) {
