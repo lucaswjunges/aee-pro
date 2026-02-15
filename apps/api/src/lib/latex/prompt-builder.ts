@@ -85,15 +85,15 @@ function getHeatInstruction(level: number): string {
     case 4:
       return `ESTILO VISUAL: ELABORADO (Nível 4)
 - Use TODAS as tcolorbox (infobox, alertbox, successbox, datacard, atividadebox, dicabox, materialbox, sessaobox).
-- pgfplots para gráfico de barras de desenvolvimento.
-- Diagramas TikZ (timeline, fluxograma, árvore familiar).
+- Para dados de desenvolvimento, use TABELAS coloridas com booktabs e ícones (\\cmark, \\starmark) — NÃO use pgfplots/axis.
+- Diagramas TikZ (timeline, fluxograma, árvore familiar) usando nodes e arrows.
 - Capa profissional com TikZ (barras de cor, textos estilizados, card de dados).
 - objtag para categorizar atividades.`;
     case 5:
       return `ESTILO VISUAL: MÁXIMO (Nível 5)
-- Use TUDO disponível no preâmbulo: TODAS as tcolorbox, pgfplots, TikZ avançado.
-- pgfplots para gráficos de barras e radar charts.
-- Mind maps TikZ, diagramas de fluxo elaborados, timelines detalhadas.
+- Use TUDO disponível no preâmbulo: TODAS as tcolorbox, TikZ avançado.
+- Para dados e indicadores, use TABELAS elaboradas com cores, ícones (\\cmark, \\starmark), barras visuais com \\rule{Xcm}{0.3cm} — NÃO use pgfplots/axis.
+- Diagramas TikZ elaborados: timelines, fluxogramas, árvores com nodes e arrows.
 - Capa completa com TikZ (gradiente, círculos decorativos, barras douradas).
 - Watermark CONFIDENCIAL já está no preâmbulo.
 - Cores em toda parte, ícones (\\cmark, \\starmark, \\hand, \\bulb).
@@ -196,7 +196,7 @@ CORES DISPONÍVEIS: aeeblue, aeegold, aeelightblue, aeegreen, aeered, aeeorange,
 
 COMANDOS ATALHO: \\cmark (check), \\starmark (estrela), \\hand (mão), \\bulb (lâmpada)
 
-PACOTES DISPONÍVEIS: tikz (com libraries: positioning, shapes.geometric, calc, decorations.pathmorphing, shadows, patterns, fit, arrows.meta, backgrounds), pgfplots, tabularx, booktabs, multirow, makecell, colortbl, longtable, adjustbox, pifont, enumitem, fancyhdr, tcolorbox, hyperref, draftwatermark
+PACOTES DISPONÍVEIS: tikz (com libraries: positioning, shapes.geometric, calc, decorations.pathmorphing, shadows, patterns, fit, arrows.meta, backgrounds), tabularx, booktabs, multirow, makecell, colortbl, longtable, adjustbox, pifont, enumitem, fancyhdr, tcolorbox, hyperref, draftwatermark
 `;
 
 export function buildLatexPrompt(
@@ -241,7 +241,16 @@ REGRAS CRÍTICAS:
 15. TABELAS DEVEM CABER NA PÁGINA: use tabularx com largura \\textwidth e colunas X (auto-ajuste). Para tabelas com muitas colunas, envolva em \\adjustbox{max width=\\textwidth}{...}. NUNCA use colunas l/c/r para texto longo — use p{Xcm} ou X.
 16. Todas as tcolorbox já são breakable por padrão — NÃO adicione breakable manualmente. O argumento opcional é SOMENTE o título: \\begin{infobox}[Meu Título].
 17. Texto dentro de células de tabela DEVE ser curto. Se precisar de texto longo, use colunas p{} ou X com largura proporcional.
-18. PROIBIDO (causa erro fatal): NÃO use condicionais TeX: \\ifnum, \\ifdim, \\ifx, \\ifodd, \\ifcase, \\or, \\else, \\fi. NÃO use \\foreach com rnd (aleatoriedade) — círculos decorativos aleatórios SEMPRE falham. NÃO use \\pgfmathparse inline em especificações de cor (ex: \\fill[cor!\\pgfmathresult!white]). Para capas TikZ: use APENAS retângulos coloridos fixos, nodes com texto, linhas decorativas. Cores devem ser literais (aeeblue, aeegold), NUNCA calculadas.
+18. PROIBIDO (causa erro fatal):
+  - NÃO use condicionais TeX: \\ifnum, \\ifdim, \\ifx, \\ifodd, \\ifcase, \\or, \\else, \\fi.
+  - NÃO use \\foreach com rnd (aleatoriedade) — círculos decorativos aleatórios SEMPRE falham.
+  - NÃO use \\pgfmathparse inline em especificações de cor (ex: \\fill[cor!\\pgfmathresult!white]).
+  - NÃO use \\begin{axis} nem pgfplots para gráficos. Em vez disso, use TABELAS com booktabs e ícones para representar dados visuais, ou diagramas TikZ simples com nodes e shapes.
+  - NÃO coloque longtable dentro de adjustbox, tcolorbox ou qualquer grupo — longtable DEVE estar no nível raiz do documento. Use tabular dentro de adjustbox se precisar redimensionar.
+  - NÃO use colunas X em longtable — X é exclusivo de tabularx.
+  - NÃO use \\multirowcell — use \\multirow{N}{*}{texto}.
+  - Para capas TikZ: use APENAS retângulos coloridos fixos, nodes com texto, linhas decorativas. Cores devem ser literais (aeeblue, aeegold), NUNCA calculadas.
+19. Se o documento for longo, GARANTA que todo conteúdo esteja COMPLETO. Não interrompa no meio de uma seção ou atividade. É melhor ter menos seções completas do que muitas seções incompletas.
 
 ${AVAILABLE_LATEX_REFERENCE}
 

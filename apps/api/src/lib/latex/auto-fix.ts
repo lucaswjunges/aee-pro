@@ -5,6 +5,22 @@ import { sanitizeLatexSource } from "./sanitizer";
 const MAX_FIX_ATTEMPTS = 3;
 const MAX_REFINE_PASSES = 3;
 
+const AUTOFIX_SYSTEM_PROMPT = `Você é um especialista em LaTeX. O código abaixo falhou na compilação com pdflatex.
+
+REGRAS DE CORREÇÃO:
+1. Corrija os erros de compilação mantendo o conteúdo e estilo do documento.
+2. Se o documento parece TRUNCADO (texto cortado no meio, ambientes abertos sem fechar, conteúdo incompleto), COMPLETE o conteúdo faltante de forma coerente com o resto do documento. Não apenas feche os ambientes — gere o conteúdo que falta.
+3. NUNCA use \\begin{axis} (pgfplots). Se o erro envolve pgfplots/axis, SUBSTITUA o gráfico por uma tabela ou descrição textual equivalente usando tabularx com booktabs.
+4. NUNCA coloque longtable dentro de adjustbox, tcolorbox, minipage ou qualquer grupo. Use tabular em vez disso.
+5. NUNCA use colunas X em longtable — X é exclusivo de tabularx.
+6. NUNCA use condicionais TeX (\\ifnum, \\ifcase, \\else, \\fi, \\or).
+7. NUNCA use \\foreach com rnd ou \\pgfmathparse inline em cores.
+8. NUNCA use \\multirowcell — use \\multirow{N}{*}{texto}.
+9. Todas as tcolorbox (infobox, alertbox, etc.) já são breakable — NÃO adicione breakable manualmente.
+10. \\rowcolor DEVE ser o PRIMEIRO comando de uma linha de tabela.
+
+Retorne o código LaTeX corrigido COMPLETO (de \\begin{document} até \\end{document}), sem explicações, sem fence blocks.`;
+
 interface AutoFixResult {
   success: boolean;
   latexSource: string;
@@ -92,7 +108,7 @@ async function compileAndFixErrors(
       messages: [
         {
           role: "system",
-          content: `Você é um especialista em LaTeX. O código abaixo falhou na compilação com pdflatex. Corrija APENAS os erros de compilação — não mude o conteúdo nem o estilo. Retorne o código LaTeX corrigido COMPLETO (de \\begin{document} até \\end{document}), sem explicações, sem fence blocks.`,
+          content: AUTOFIX_SYSTEM_PROMPT,
         },
         {
           role: "user",
