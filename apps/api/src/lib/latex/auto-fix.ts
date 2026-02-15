@@ -43,9 +43,12 @@ export async function compileWithAutoFix(
   aiModel: string,
   maxTokens = 16000,
 ): Promise<AutoFixResult> {
+  // Sanitize source before any compilation attempt
+  const sanitized = sanitizeLatexSource(initialSource);
+
   // Phase 1: compile and fix compilation errors
   const result = await compileAndFixErrors(
-    initialSource,
+    sanitized,
     compilerUrl,
     compilerToken,
     aiProvider,
