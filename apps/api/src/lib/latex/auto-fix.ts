@@ -2,6 +2,7 @@ import type { AIProvider } from "../../lib/ai/types";
 import { compileLatex, type CompileResult } from "./compiler-client";
 
 const MAX_FIX_ATTEMPTS = 3;
+const MAX_REFINE_PASSES = 3;
 
 interface AutoFixResult {
   success: boolean;
@@ -13,12 +14,45 @@ interface AutoFixResult {
   warnings?: string[];
 }
 
+/**
+ * Full pipeline: compile → fix errors → iteratively refine warnings.
+ * @param maxTokens — token budget for AI responses (should match original generation).
+ */
 export async function compileWithAutoFix(
   initialSource: string,
   compilerUrl: string,
   compilerToken: string,
   aiProvider: AIProvider,
   aiModel: string,
+  maxTokens = 16000,
+): Promise<AutoFixResult> {
+  // Phase 1: compile and fix compilation errors
+  const result = await compileAndFixErrors(
+    initialSource,
+    compilerUrl,
+    compilerToken,
+    aiProvider,
+    aiModel,
+    maxTokens,
+  );
+
+  if (!result.success) return result;
+
+  // Phase 2: iteratively refine layout warnings
+  return refineWarnings(result, compilerUrl, compilerToken, aiProvider, aiModel, maxTokens);
+}
+
+/**
+ * Compile and fix compilation errors (up to MAX_FIX_ATTEMPTS).
+ * Does NOT refine warnings — that's handled separately.
+ */
+async function compileAndFixErrors(
+  initialSource: string,
+  compilerUrl: string,
+  compilerToken: string,
+  aiProvider: AIProvider,
+  aiModel: string,
+  maxTokens = 16000,
 ): Promise<AutoFixResult> {
   let source = initialSource;
 
@@ -30,22 +64,13 @@ export async function compileWithAutoFix(
     );
 
     if (result.success && result.pdfBase64) {
-      // Try one refinement pass if there are layout warnings
-      const refined = await tryRefineWarnings(
-        source,
-        result,
-        compilerUrl,
-        compilerToken,
-        aiProvider,
-        aiModel,
-      );
       return {
         success: true,
-        latexSource: refined.latexSource,
-        pdfBase64: refined.pdfBase64,
-        pdfSizeBytes: refined.pdfSizeBytes,
+        latexSource: source,
+        pdfBase64: result.pdfBase64,
+        pdfSizeBytes: result.pdfSizeBytes,
         attempts: attempt,
-        warnings: refined.warnings,
+        warnings: result.warnings,
       };
     }
 
@@ -59,7 +84,8 @@ export async function compileWithAutoFix(
       };
     }
 
-    // Try AI fix
+    // Try AI fix for compilation error
+    console.log(`[auto-fix] Erro de compilação (tentativa ${attempt}/${MAX_FIX_ATTEMPTS}), pedindo IA corrigir...`);
     const fixResult = await aiProvider.generate({
       model: aiModel,
       messages: [
@@ -72,13 +98,12 @@ export async function compileWithAutoFix(
           content: `ERRO DE COMPILAÇÃO:\n${result.error}\n\nCÓDIGO LATEX COM ERRO:\n${source}`,
         },
       ],
-      maxTokens: 16000,
+      maxTokens,
       temperature: 0.2,
     });
 
     const fixed = extractLatexBody(fixResult.content);
     if (fixed) {
-      // Reconstruct: keep preamble, replace body
       const preambleEnd = source.indexOf("\\begin{document}");
       if (preambleEnd !== -1) {
         source = source.substring(0, preambleEnd) + fixed;
@@ -108,100 +133,118 @@ function hasSignificantWarnings(warnings?: string[]): boolean {
   );
 }
 
+function rebuildSource(currentSource: string, newBody: string): string {
+  const preambleEnd = currentSource.indexOf("\\begin{document}");
+  if (preambleEnd !== -1) {
+    return currentSource.substring(0, preambleEnd) + newBody;
+  }
+  return newBody;
+}
+
 /**
- * If compilation succeeded but has significant layout warnings,
- * ask the AI to fix them. Returns the better version (original or refined).
- * At most 1 extra AI call + 1 extra compilation.
+ * Iteratively refine layout warnings until:
+ * - Zero warnings remain, OR
+ * - No improvement from last pass, OR
+ * - MAX_REFINE_PASSES reached.
+ *
+ * Each pass: AI fixes layout → compileAndFixErrors (handles any new errors).
+ * Always keeps the best version seen so far.
  */
-async function tryRefineWarnings(
-  source: string,
-  originalResult: CompileResult,
+async function refineWarnings(
+  initialResult: AutoFixResult,
   compilerUrl: string,
   compilerToken: string,
   aiProvider: AIProvider,
   aiModel: string,
-): Promise<{
-  latexSource: string;
-  pdfBase64?: string;
-  pdfSizeBytes?: number;
-  warnings?: string[];
-}> {
-  if (!hasSignificantWarnings(originalResult.warnings)) {
-    return {
-      latexSource: source,
-      pdfBase64: originalResult.pdfBase64,
-      pdfSizeBytes: originalResult.pdfSizeBytes,
-      warnings: originalResult.warnings,
-    };
+  maxTokens = 16000,
+): Promise<AutoFixResult> {
+  if (!hasSignificantWarnings(initialResult.warnings)) {
+    console.log("[auto-fix] Sem warnings significativos, pulando refinamento");
+    return initialResult;
   }
 
-  try {
-    const fixResult = await aiProvider.generate({
-      model: aiModel,
-      messages: [
-        {
-          role: "system",
-          content: `Você é um especialista em LaTeX. O documento abaixo compilou com sucesso, mas gerou avisos de layout (overfull/underfull boxes). Corrija os problemas de layout sem alterar o conteúdo textual. Técnicas comuns: ajustar largura de tabelas, usar \\adjustbox, quebrar linhas longas, usar \\sloppy localmente. Retorne o código LaTeX corrigido COMPLETO (de \\begin{document} até \\end{document}), sem explicações, sem fence blocks.`,
-        },
-        {
-          role: "user",
-          content: `AVISOS DE COMPILAÇÃO:\n${originalResult.warnings!.join("\n")}\n\nCÓDIGO LATEX:\n${source}`,
-        },
-      ],
-      maxTokens: 16000,
-      temperature: 0.2,
-    });
+  let best = initialResult;
+  let bestWarningCount = initialResult.warnings?.length ?? 0;
+  let currentSource = initialResult.latexSource;
+  let currentWarnings = initialResult.warnings!;
 
-    const fixed = extractLatexBody(fixResult.content);
-    if (!fixed) {
-      return {
-        latexSource: source,
-        pdfBase64: originalResult.pdfBase64,
-        pdfSizeBytes: originalResult.pdfSizeBytes,
-        warnings: originalResult.warnings,
-      };
-    }
+  console.log(`[auto-fix] ${bestWarningCount} warning(s) significativo(s), iniciando refinamento iterativo...`);
 
-    // Reconstruct: keep preamble, replace body
-    let refinedSource: string;
-    const preambleEnd = source.indexOf("\\begin{document}");
-    if (preambleEnd !== -1) {
-      refinedSource = source.substring(0, preambleEnd) + fixed;
-    } else {
-      refinedSource = fixed;
-    }
+  for (let pass = 1; pass <= MAX_REFINE_PASSES; pass++) {
+    console.log(`[auto-fix] Refinamento ${pass}/${MAX_REFINE_PASSES}: ${currentWarnings.length} warning(s), enviando para IA...`);
 
-    // Recompile the refined version
-    const refinedResult = await compileLatex(
-      refinedSource,
-      compilerUrl,
-      compilerToken,
-    );
+    try {
+      const fixResult = await aiProvider.generate({
+        model: aiModel,
+        messages: [
+          {
+            role: "system",
+            content: `Você é um especialista em LaTeX. O documento abaixo compilou com sucesso, mas gerou avisos de layout (overfull/underfull boxes). Corrija os problemas de layout sem alterar o conteúdo textual. Técnicas comuns: ajustar largura de tabelas, usar \\adjustbox{max width=\\textwidth}{...}, quebrar linhas longas, usar \\sloppy localmente, reduzir fonte em tabelas com \\small ou \\footnotesize, usar p{Xcm} em vez de l/c/r em colunas de tabela. Retorne o código LaTeX corrigido COMPLETO (de \\begin{document} até \\end{document}), sem explicações, sem fence blocks.`,
+          },
+          {
+            role: "user",
+            content: `AVISOS DE COMPILAÇÃO:\n${currentWarnings.join("\n")}\n\nCÓDIGO LATEX:\n${currentSource}`,
+          },
+        ],
+        maxTokens,
+        temperature: 0.2,
+      });
 
-    // Only use refined version if it compiled and didn't get worse
-    if (refinedResult.success && refinedResult.pdfBase64) {
-      const origWarningCount = originalResult.warnings?.length ?? 0;
-      const newWarningCount = refinedResult.warnings?.length ?? 0;
-      if (newWarningCount <= origWarningCount) {
-        return {
-          latexSource: refinedSource,
-          pdfBase64: refinedResult.pdfBase64,
-          pdfSizeBytes: refinedResult.pdfSizeBytes,
-          warnings: refinedResult.warnings,
-        };
+      const fixed = extractLatexBody(fixResult.content);
+      if (!fixed) {
+        console.log(`[auto-fix] Passo ${pass}: IA não retornou corpo válido, parando`);
+        break;
       }
+
+      const refinedSource = rebuildSource(currentSource, fixed);
+
+      // Compile with error auto-fix (so if AI introduced an error, it gets corrected)
+      const refinedResult = await compileAndFixErrors(
+        refinedSource,
+        compilerUrl,
+        compilerToken,
+        aiProvider,
+        aiModel,
+        maxTokens,
+      );
+
+      if (!refinedResult.success) {
+        console.log(`[auto-fix] Passo ${pass}: falhou na compilação mesmo com auto-fix, parando`);
+        break;
+      }
+
+      const newWarningCount = refinedResult.warnings?.length ?? 0;
+      console.log(`[auto-fix] Passo ${pass}: ${bestWarningCount} → ${newWarningCount} warning(s)`);
+
+      // Keep if better than our best so far
+      if (newWarningCount < bestWarningCount) {
+        best = refinedResult;
+        bestWarningCount = newWarningCount;
+      }
+
+      // Zero warnings — done!
+      if (newWarningCount === 0) {
+        console.log(`[auto-fix] Zero warnings! Refinamento completo.`);
+        break;
+      }
+
+      // Didn't improve from previous pass — stop iterating
+      if (newWarningCount >= currentWarnings.length) {
+        console.log(`[auto-fix] Passo ${pass} não melhorou (${currentWarnings.length} → ${newWarningCount}), parando`);
+        break;
+      }
+
+      // Continue with refined version for next pass
+      currentSource = refinedResult.latexSource;
+      currentWarnings = refinedResult.warnings ?? [];
+    } catch (err) {
+      console.log(`[auto-fix] Erro no passo ${pass}:`, err instanceof Error ? err.message : err);
+      break;
     }
-  } catch {
-    // Refinement failed — keep original
   }
 
-  // Fallback: return original successful compilation
-  return {
-    latexSource: source,
-    pdfBase64: originalResult.pdfBase64,
-    pdfSizeBytes: originalResult.pdfSizeBytes,
-    warnings: originalResult.warnings,
-  };
+  console.log(`[auto-fix] Refinamento finalizado: ${initialResult.warnings?.length ?? 0} → ${bestWarningCount} warning(s)`);
+  return best;
 }
 
 function extractLatexBody(content: string): string | null {

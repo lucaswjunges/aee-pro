@@ -122,6 +122,8 @@ latexDocumentRoutes.post("/generate", async (c) => {
     documentType: string;
     heatLevel?: number;
     sizeLevel?: number;
+    customPrompt?: string;
+    unlimitedTokens?: boolean;
   };
 
   if (!body.studentId || !body.documentType) {
@@ -130,6 +132,8 @@ latexDocumentRoutes.post("/generate", async (c) => {
 
   const heatLevel = Math.max(1, Math.min(5, body.heatLevel ?? 3));
   const sizeLevel = Math.max(1, Math.min(5, body.sizeLevel ?? 3));
+  const customPrompt = body.customPrompt?.trim() || undefined;
+  const unlimitedTokens = body.unlimitedTokens === true;
 
   const typeConfig = getDocumentTypeConfig(body.documentType);
   if (!typeConfig) {
@@ -176,7 +180,9 @@ latexDocumentRoutes.post("/generate", async (c) => {
     body.documentType,
     heatLevel,
     sizeLevel,
+    customPrompt,
   );
+  const effectiveMaxTokens = unlimitedTokens ? 65536 : getMaxTokens(sizeLevel);
 
   // Create record
   const now = new Date().toISOString();
@@ -213,7 +219,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
           { role: "system", content: system },
           { role: "user", content: user },
         ],
-        maxTokens: getMaxTokens(sizeLevel),
+        maxTokens: effectiveMaxTokens,
         temperature: 0.7,
       });
 
@@ -241,6 +247,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
         c.env.LATEX_COMPILER_TOKEN,
         provider,
         model,
+        effectiveMaxTokens,
       );
 
       if (compileResult.success && compileResult.pdfBase64) {
@@ -373,9 +380,11 @@ latexDocumentRoutes.get("/:id/pdf", async (c) => {
 
   const headers = new Headers();
   headers.set("Content-Type", "application/pdf");
+  const safeFilename = doc.title.replace(/[^a-zA-Z0-9\s-]/g, "").replace(/\s+/g, "_") || "documento";
+  const utf8Filename = encodeURIComponent(doc.title.replace(/\s+/g, "_")) + ".pdf";
   headers.set(
     "Content-Disposition",
-    `inline; filename="${doc.title.replace(/[^a-zA-Z0-9À-ÿ\s-]/g, "").replace(/\s+/g, "_")}.pdf"`,
+    `inline; filename="${safeFilename}.pdf"; filename*=UTF-8''${utf8Filename}`,
   );
 
   return new Response(object.body, { headers });
@@ -434,6 +443,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
         c.env.LATEX_COMPILER_TOKEN,
         provider,
         model,
+        getMaxTokens(doc.sizeLevel),
       );
     }
   }
@@ -563,6 +573,7 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
       c.env.LATEX_COMPILER_TOKEN,
       provider,
       model,
+      getMaxTokens(doc.sizeLevel),
     );
 
     if (compileResult.success && compileResult.pdfBase64) {
@@ -790,6 +801,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
         c.env.LATEX_COMPILER_TOKEN,
         provider,
         model,
+        getMaxTokens(sizeLevel),
       );
 
       if (compileResult.success && compileResult.pdfBase64) {

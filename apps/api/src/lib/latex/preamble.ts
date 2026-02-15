@@ -24,6 +24,11 @@ export function getLatexPreamble(options: PreambleOptions): string {
 \\usepackage{setspace}
 \\onehalfspacing
 
+% --- Overflow prevention ---
+\\tolerance=1000
+\\emergencystretch=3em
+\\hbadness=2000
+
 % --- Page Layout ---
 \\usepackage[
   top=2.5cm,

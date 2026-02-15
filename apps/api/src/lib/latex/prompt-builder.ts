@@ -196,7 +196,7 @@ CORES DISPONÍVEIS: aeeblue, aeegold, aeelightblue, aeegreen, aeered, aeeorange,
 
 COMANDOS ATALHO: \\cmark (check), \\starmark (estrela), \\hand (mão), \\bulb (lâmpada)
 
-PACOTES DISPONÍVEIS: tikz (com libraries: positioning, shapes.geometric, calc, decorations.pathmorphing, shadows, patterns, fit, arrows.meta, backgrounds), pgfplots, tabularx, booktabs, multirow, colortbl, longtable, pifont, enumitem, fancyhdr, tcolorbox, hyperref, draftwatermark
+PACOTES DISPONÍVEIS: tikz (com libraries: positioning, shapes.geometric, calc, decorations.pathmorphing, shadows, patterns, fit, arrows.meta, backgrounds), pgfplots, tabularx, booktabs, multirow, makecell, colortbl, longtable, adjustbox, pifont, enumitem, fancyhdr, tcolorbox, hyperref, draftwatermark
 `;
 
 export function buildLatexPrompt(
@@ -204,6 +204,7 @@ export function buildLatexPrompt(
   documentType: string,
   heatLevel: number,
   sizeLevel: number,
+  customPrompt?: string,
 ): PromptResult {
   const config = getDocumentTypeConfig(documentType);
   if (!config) {
@@ -233,10 +234,22 @@ REGRAS CRÍTICAS:
 8. Em TikZ: sempre nomeie nodes com texto (ex: \\node (meunode) {...}), NUNCA use números puros como nome de node.
 9. NÃO use TikZ mindmap (a biblioteca não está disponível). Para diagramas conceituais, use nodes com setas e positioning.
 10. A data de hoje é ${today}.
+11. \\rowcolor DEVE ser o PRIMEIRO comando de uma linha de tabela (antes de qualquer &). NUNCA coloque \\rowcolor depois de &.
+12. Em tabelas, use \\makecell{linha1 \\\\ linha2} para quebrar texto dentro de uma célula. NUNCA use \\\\ solto dentro de uma célula.
+13. Para multirow com texto longo, use \\multirow{N}{*}{texto} e NUNCA \\multirowcell.
+14. Em TikZ: use valores de coordenadas PEQUENOS (max 100). Dimensões muito grandes causam "Dimension too large".
+15. TABELAS DEVEM CABER NA PÁGINA: use tabularx com largura \\textwidth e colunas X (auto-ajuste). Para tabelas com muitas colunas, envolva em \\adjustbox{max width=\\textwidth}{...}. NUNCA use colunas l/c/r para texto longo — use p{Xcm} ou X.
+16. Para tcolorbox longas que podem ultrapassar a página, adicione a opção breakable: \\begin{infobox}[breakable, Título]...
+17. Texto dentro de células de tabela DEVE ser curto. Se precisar de texto longo, use colunas p{} ou X com largura proporcional.
+18. Em TikZ: NÃO use \\ifnum, \\foreach com condicionais complexos, nem \\pgfmathparse inline em especificações de cor. Mantenha capas TikZ simples: retângulos coloridos, nodes com texto, linhas decorativas. Evite aleatoriedade (rnd) e condicionais.
 
 ${AVAILABLE_LATEX_REFERENCE}
 
 ${antiDetection}`;
+
+  const customBlock = customPrompt?.trim()
+    ? `\nINSTRUÇÕES ADICIONAIS DO USUÁRIO:\n${customPrompt.trim()}\n`
+    : "";
 
   const user = `TIPO DE DOCUMENTO: ${config.name}
 
@@ -248,7 +261,7 @@ ${sizeInstruction}
 
 DADOS DO ALUNO:
 ${studentData}
-
+${customBlock}
 Gere o corpo LaTeX completo, começando com \\begin{document} e terminando com \\end{document}. O preâmbulo já está pronto — NÃO o inclua.
 
 Ao final do documento, adicione:
