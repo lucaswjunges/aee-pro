@@ -540,26 +540,18 @@ documentRoutes.get("/:id/export/pdf", async (c) => {
     return c.json({ success: false, error: "Documento ainda não foi gerado" }, 400);
   }
 
-  // Get student name
   const student = await db
-    .select({ name: students.name, school: students.school })
+    .select({ name: students.name })
     .from(students)
     .where(eq(students.id, doc.studentId))
     .get();
 
   const studentName = student?.name ?? "Aluno";
-  const schoolName = student?.school ?? "Escola";
+  const date = doc.generatedAt
+    ? new Date(doc.generatedAt).toLocaleDateString("pt-BR")
+    : new Date().toLocaleDateString("pt-BR");
 
-  // Build a simple LaTeX document from plain text
-  const preamble = getLatexPreamble({
-    documentTitle: doc.title,
-    studentName,
-    schoolName,
-  });
-
-  const escapedContent = escapeLatex(doc.content);
-  const fullLatex = preamble + "\\begin{document}\n\n" + escapedContent + "\n\n\\end{document}\n";
-
+  const fullLatex = buildSimplePdfLatex(doc.title, doc.content, studentName, date);
   const result = await compileLatex(fullLatex, c.env.LATEX_COMPILER_URL, c.env.LATEX_COMPILER_TOKEN);
 
   if (!result.success || !result.pdfBase64) {
@@ -778,28 +770,104 @@ Retorne o código LaTeX COMPLETO (de \\begin{document} até \\end{document}), se
   return c.json({ success: true, data: newDoc }, 201);
 });
 
-/** Escape special LaTeX characters in plain text */
+/** Escape special LaTeX characters in a text fragment */
 function escapeLatex(text: string): string {
-  // Preserve paragraph breaks (double newlines)
-  const paragraphs = text.split(/\n\s*\n/);
+  return text
+    .replace(/\\/g, "\\textbackslash{}")
+    .replace(/([&%$#_{}])/g, "\\$1")
+    .replace(/~/g, "\\textasciitilde{}")
+    .replace(/\^/g, "\\textasciicircum{}")
+    .replace(/—/g, "---")
+    .replace(/–/g, "--")
+    .replace(/\u201c/g, "``")
+    .replace(/[\u201d\u201f]/g, "''")
+    .replace(/"/g, "''");
+}
 
-  return paragraphs
-    .map((para) => {
-      let escaped = para
-        .replace(/\\/g, "\\textbackslash{}")
-        .replace(/([&%$#_{}])/g, "\\$1")
-        .replace(/~/g, "\\textasciitilde{}")
-        .replace(/\^/g, "\\textasciicircum{}")
-        .replace(/—/g, "---")
-        .replace(/–/g, "--")
-        .replace(/"/g, "``")
-        .replace(/"/g, "''")
-        .replace(/"/g, "''");
-      // Preserve single line breaks as LaTeX line breaks
-      escaped = escaped.replace(/\n/g, " \\\\\n");
-      return escaped;
+/**
+ * Build a clean, simple PDF from plain text — matches DOCX style.
+ * Minimal preamble, Arial-like font, title + subtitle + content.
+ * Parses markdown-style headings and **bold**.
+ */
+function buildSimplePdfLatex(
+  title: string,
+  content: string,
+  studentName: string,
+  date: string,
+): string {
+  const preamble = `\\documentclass[12pt,a4paper]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage[T1]{fontenc}
+\\usepackage[brazilian]{babel}
+\\usepackage{helvet}
+\\renewcommand{\\familydefault}{\\sfdefault}
+\\usepackage[margin=2.5cm]{geometry}
+\\usepackage{setspace}
+\\onehalfspacing
+\\usepackage{parskip}
+\\usepackage{titlesec}
+\\titleformat{\\section}{\\large\\bfseries}{}{0em}{}
+\\titleformat{\\subsection}{\\normalsize\\bfseries}{}{0em}{}
+\\usepackage{fancyhdr}
+\\pagestyle{fancy}
+\\fancyhf{}
+\\fancyfoot[C]{\\footnotesize\\thepage}
+\\renewcommand{\\headrulewidth}{0pt}
+\\renewcommand{\\footrulewidth}{0pt}
+\\usepackage{hyperref}
+\\hypersetup{hidelinks}
+`;
+
+  const lines = content.split("\n");
+  const bodyLines: string[] = [];
+
+  // Title block
+  bodyLines.push("\\begin{center}");
+  bodyLines.push(`{\\Large\\bfseries ${escapeLatex(title)}}\\\\[6pt]`);
+  bodyLines.push(`{\\small\\color[gray]{0.4} Aluno(a): ${escapeLatex(studentName)} --- ${escapeLatex(date)}}`);
+  bodyLines.push("\\end{center}");
+  bodyLines.push("\\vspace{0.5cm}");
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      bodyLines.push("");
+      continue;
+    }
+
+    // Markdown-style headings
+    const h1Match = trimmed.match(/^##\s+(.+)/);
+    const h0Match = trimmed.match(/^#\s+(.+)/);
+
+    if (h0Match) {
+      bodyLines.push(`\\section*{${escapeAndBold(h0Match[1])}}`);
+    } else if (h1Match) {
+      bodyLines.push(`\\subsection*{${escapeAndBold(h1Match[1])}}`);
+    } else if (/^\*\*(.+?)\*\*$/.test(trimmed)) {
+      // Full bold line
+      const inner = trimmed.match(/^\*\*(.+?)\*\*$/)![1];
+      bodyLines.push(`\\textbf{${escapeLatex(inner)}}\\\\`);
+    } else {
+      // Regular line with inline **bold** support
+      bodyLines.push(escapeAndBold(trimmed) + "\\\\");
+    }
+  }
+
+  return preamble + "\n\\begin{document}\n\n" + bodyLines.join("\n") + "\n\n\\end{document}\n";
+}
+
+/** Escape LaTeX + convert **bold** markers to \\textbf */
+function escapeAndBold(text: string): string {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts
+    .filter(Boolean)
+    .map((part) => {
+      const boldMatch = part.match(/^\*\*(.+)\*\*$/);
+      if (boldMatch) return `\\textbf{${escapeLatex(boldMatch[1])}}`;
+      return escapeLatex(part);
     })
-    .join("\n\n");
+    .join("");
 }
 
 function getDefaultModel(provider: string): string {
