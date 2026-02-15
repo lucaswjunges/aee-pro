@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft, FileText, CheckCircle, AlertCircle, Clock, ArrowRight, Loader2, FileCode } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { ArrowLeft, FileText, CheckCircle, AlertCircle, Clock, ArrowRight, Loader2, FileCode, Search, X } from "lucide-react";
 import type { Document, LatexDocument, Student } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 
 interface UnifiedDoc {
@@ -24,10 +25,37 @@ const statusConfig: Record<string, { label: string; variant: "success" | "warnin
   error: { label: "Erro", variant: "destructive", icon: AlertCircle },
 };
 
+const STATUS_FILTERS = [
+  { value: "", label: "Todos" },
+  { value: "completed", label: "Concluídos" },
+  { value: "error", label: "Com Erro" },
+  { value: "generating", label: "Gerando" },
+] as const;
+
+function isErrorStatus(status: string) {
+  return status === "error" || status === "compile_error";
+}
+
+function isGeneratingStatus(status: string) {
+  return status === "generating" || status === "compiling";
+}
+
 export function AllDocumentsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [documents, setDocuments] = useState<UnifiedDoc[]>([]);
   const [students, setStudents] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  const statusFilter = searchParams.get("status") ?? "";
+
+  const setStatusFilter = (value: string) => {
+    if (value) {
+      setSearchParams({ status: value });
+    } else {
+      setSearchParams({});
+    }
+  };
 
   useEffect(() => {
     Promise.all([
@@ -76,6 +104,31 @@ export function AllDocumentsPage() {
     });
   }, []);
 
+  const filtered = useMemo(() => {
+    let list = documents;
+
+    // Filter by status
+    if (statusFilter === "completed") {
+      list = list.filter((d) => d.status === "completed");
+    } else if (statusFilter === "error") {
+      list = list.filter((d) => isErrorStatus(d.status));
+    } else if (statusFilter === "generating") {
+      list = list.filter((d) => isGeneratingStatus(d.status));
+    }
+
+    // Filter by search text
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (d) =>
+          d.title.toLowerCase().includes(q) ||
+          (students[d.studentId] ?? "").toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [documents, students, statusFilter, search]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -87,10 +140,46 @@ export function AllDocumentsPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold">Todos os Documentos</h1>
           <p className="text-muted-foreground text-sm">
-            {loading ? "Carregando..." : `${documents.length} documento${documents.length !== 1 ? "s" : ""}`}
+            {loading ? "Carregando..." : `${filtered.length} de ${documents.length} documento${documents.length !== 1 ? "s" : ""}`}
           </p>
         </div>
       </div>
+
+      {/* Filters */}
+      {!loading && documents.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por título ou aluno..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 pr-9"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {STATUS_FILTERS.map((f) => (
+              <Button
+                key={f.value}
+                variant={statusFilter === f.value ? "default" : "outline"}
+                size="sm"
+                onClick={() => setStatusFilter(f.value)}
+                className="text-xs"
+              >
+                {f.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">
@@ -103,9 +192,17 @@ export function AllDocumentsPage() {
           <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
           <p>Nenhum documento gerado ainda.</p>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
+          <p>Nenhum documento encontrado.</p>
+          <Button variant="link" size="sm" onClick={() => { setSearch(""); setStatusFilter(""); }}>
+            Limpar filtros
+          </Button>
+        </div>
       ) : (
         <div className="space-y-2">
-          {documents.map((doc) => {
+          {filtered.map((doc) => {
             const status = statusConfig[doc.status] ?? statusConfig.error;
             const StatusIcon = status.icon;
             const studentName = students[doc.studentId] ?? "Aluno removido";
