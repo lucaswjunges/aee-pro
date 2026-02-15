@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, and, or, isNull } from "drizzle-orm";
+import { eq, and, or, isNull, count } from "drizzle-orm";
 import { prompts } from "@aee-pro/db/schema";
 import { createDb } from "../db/index";
 import { authMiddleware } from "../middleware/auth";
@@ -20,6 +20,25 @@ export const promptRoutes = new Hono<PromptEnv>();
 promptRoutes.get("/", authMiddleware, async (c) => {
   const userId = c.get("userId");
   const db = createDb(c.env.DB);
+
+  // Auto-seed built-in prompts if none exist
+  const builtInCount = await db
+    .select({ count: count() })
+    .from(prompts)
+    .where(eq(prompts.isBuiltIn, true));
+
+  if ((builtInCount[0]?.count ?? 0) === 0) {
+    const now = new Date().toISOString();
+    for (const prompt of PROMPTS) {
+      await db.insert(prompts).values({
+        ...prompt,
+        isBuiltIn: true,
+        userId: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  }
 
   // Get all built-in prompts + user's custom prompts
   const result = await db

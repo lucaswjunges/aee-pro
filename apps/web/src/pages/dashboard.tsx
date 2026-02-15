@@ -24,6 +24,7 @@ interface RecentDocument {
   studentId: string;
   studentName: string;
   documentType: string;
+  source: "plain" | "latex";
   createdAt: string;
 }
 
@@ -54,6 +55,7 @@ export function DashboardPage() {
       case "completed":
         return <CheckCircle className="h-4 w-4 text-green-600" />;
       case "error":
+      case "compile_error":
         return <AlertCircle className="h-4 w-4 text-red-500" />;
       default:
         return <Clock className="h-4 w-4 text-yellow-500" />;
@@ -65,7 +67,10 @@ export function DashboardPage() {
       case "completed":
         return "Concluído";
       case "error":
+      case "compile_error":
         return "Erro";
+      case "compiling":
+        return "Compilando...";
       default:
         return "Gerando...";
     }
@@ -192,7 +197,7 @@ export function DashboardPage() {
               {stats.recentDocuments.map((doc) => (
                 <Link
                   key={doc.id}
-                  to={`/alunos/${doc.studentId}/documentos/${doc.id}`}
+                  to={doc.source === "latex" ? `/alunos/${doc.studentId}/documentos-latex/${doc.id}` : `/alunos/${doc.studentId}/documentos/${doc.id}`}
                   className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors"
                 >
                   {statusIcon(doc.status)}
@@ -211,7 +216,7 @@ export function DashboardPage() {
                     variant={
                       doc.status === "completed"
                         ? "success"
-                        : doc.status === "error"
+                        : doc.status === "error" || doc.status === "compile_error"
                         ? "destructive"
                         : "warning"
                     }
