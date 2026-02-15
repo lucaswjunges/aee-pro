@@ -1,6 +1,6 @@
 import type { AIProvider } from "../../lib/ai/types";
 import { compileLatex, type CompileResult } from "./compiler-client";
-import { sanitizeLatexSource } from "./sanitizer";
+import { sanitizeLatexSource, detectTruncation } from "./sanitizer";
 
 const MAX_FIX_ATTEMPTS = 3;
 const MAX_REFINE_PASSES = 3;
@@ -57,6 +57,23 @@ export async function compileWithAutoFix(
   );
 
   if (!result.success) return result;
+
+  // Phase 1.5: detect truncated content and ask AI to complete
+  const truncation = detectTruncation(result.latexSource);
+  if (truncation) {
+    console.log(`[auto-fix] Conteúdo truncado detectado: ${truncation}`);
+    const completed = await completeTruncatedContent(
+      result,
+      truncation,
+      compilerUrl,
+      compilerToken,
+      aiProvider,
+      aiModel,
+      maxTokens,
+    );
+    if (completed) return completed;
+    // If completion failed, continue with truncated but compilable version
+  }
 
   // Phase 2: iteratively refine layout warnings
   return refineWarnings(result, compilerUrl, compilerToken, aiProvider, aiModel, maxTokens);
@@ -139,6 +156,77 @@ async function compileAndFixErrors(
     attempts: MAX_FIX_ATTEMPTS,
     lastError: "Exceeded maximum fix attempts",
   };
+}
+
+/**
+ * Ask AI to complete truncated content.
+ * The document compiles but has incomplete text (cut off mid-sentence/section).
+ */
+async function completeTruncatedContent(
+  currentResult: AutoFixResult,
+  truncationInfo: string,
+  compilerUrl: string,
+  compilerToken: string,
+  aiProvider: AIProvider,
+  aiModel: string,
+  maxTokens: number,
+): Promise<AutoFixResult | null> {
+  try {
+    const result = await aiProvider.generate({
+      model: aiModel,
+      messages: [
+        {
+          role: "system",
+          content: `Você é um especialista em LaTeX e AEE (Atendimento Educacional Especializado). O documento abaixo foi TRUNCADO — o conteúdo foi cortado no meio. Você deve COMPLETAR o documento.
+
+REGRAS:
+1. Mantenha TODO o conteúdo existente intacto — não remova nem reescreva o que já está lá.
+2. COMPLETE as partes inacabadas (frases cortadas, atividades incompletas, seções faltantes).
+3. Se uma atividade ou seção foi cortada no meio, complete-a de forma coerente.
+4. É melhor completar bem as seções existentes do que adicionar muitas novas.
+5. NÃO use \\begin{axis} (pgfplots), condicionais TeX (\\ifnum etc.), nem \\foreach com rnd.
+6. NÃO coloque longtable dentro de adjustbox.
+7. Todas as tcolorbox já são breakable — NÃO adicione breakable.
+8. Retorne o código LaTeX COMPLETO (de \\begin{document} até \\end{document}).`,
+        },
+        {
+          role: "user",
+          content: `PROBLEMA DETECTADO: ${truncationInfo}\n\nDOCUMENTO TRUNCADO:\n${currentResult.latexSource}`,
+        },
+      ],
+      maxTokens,
+      temperature: 0.3,
+    });
+
+    const completed = extractLatexBody(result.content);
+    if (!completed) {
+      console.log("[auto-fix] IA não retornou corpo válido para completar truncamento");
+      return null;
+    }
+
+    const completedSource = rebuildSource(currentResult.latexSource, completed);
+
+    // Compile the completed version
+    const compileResult = await compileAndFixErrors(
+      completedSource,
+      compilerUrl,
+      compilerToken,
+      aiProvider,
+      aiModel,
+      maxTokens,
+    );
+
+    if (compileResult.success) {
+      console.log("[auto-fix] Documento truncado completado com sucesso");
+      return compileResult;
+    }
+
+    console.log("[auto-fix] Versão completada falhou na compilação, mantendo versão truncada");
+    return null;
+  } catch (err) {
+    console.log("[auto-fix] Erro ao completar truncamento:", err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 /** Warnings worth sending to AI for refinement (layout issues). */

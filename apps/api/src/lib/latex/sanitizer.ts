@@ -9,6 +9,42 @@
  *    and their condition lines, keeping content between them.
  * 3. Replace inline \pgfmathparse...\pgfmathresult with safe defaults.
  */
+/**
+ * Detect if the LaTeX source appears truncated.
+ * Returns a description of what's truncated, or null if complete.
+ */
+export function detectTruncation(source: string): string | null {
+  const endDocIdx = source.lastIndexOf("\\end{document}");
+  if (endDocIdx === -1) return "Documento sem \\end{document}";
+
+  const body = source.substring(0, endDocIdx);
+
+  // Check for unclosed environments
+  const envRegex = /\\(begin|end)\{([^}]+)\}/g;
+  const stack: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = envRegex.exec(body)) !== null) {
+    if (m[2] === "document") continue;
+    if (m[1] === "begin") stack.push(m[2]);
+    else {
+      const idx = stack.lastIndexOf(m[2]);
+      if (idx !== -1) stack.splice(idx, 1);
+    }
+  }
+
+  if (stack.length > 0) {
+    return `Ambientes não fechados antes de \\end{document}: ${stack.join(", ")}. O conteúdo dentro desses ambientes parece ter sido cortado no meio.`;
+  }
+
+  // Check if text ends abruptly (sentence cut mid-word before \end{document})
+  const lastContent = body.substring(body.lastIndexOf("\n", endDocIdx - 50)).trim();
+  if (lastContent && !/[.!?}\])]$/.test(lastContent)) {
+    return "Texto cortado no meio de uma frase antes do final do documento.";
+  }
+
+  return null;
+}
+
 export function sanitizeLatexSource(source: string): string {
   let result = source;
 
