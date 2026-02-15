@@ -268,8 +268,7 @@ Ao final do documento, adicione:
 \\vfill
 \\begin{center}
   \\scriptsize\\color{textgray}
-  Documento gerado em ${today} pelo sistema \\textbf{AEE+ PRO}\\\\
-  Desenvolvido por \\textbf{Blumenau TI} --- \\url{www.blumenauti.com.br}\\\\[4pt]
+  Documento elaborado em ${today}.\\\\[4pt]
   \\textit{Este documento contém informações confidenciais protegidas pela LGPD (Lei 13.709/2018).}
 \\end{center}`;
 

@@ -9,7 +9,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 
   return `% ============================================================================
 % ${documentTitle} - Atendimento Educacional Especializado (AEE)
-% Gerado por AEE+ PRO | www.blumenauti.com.br
+% Atendimento Educacional Especializado
 % ============================================================================
 \\documentclass[12pt,a4paper]{article}
 
@@ -91,7 +91,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 \\fancyhead[L]{\\small\\color{textgray}\\textit{${escapeLatex(documentTitle)}}}
 \\fancyhead[R]{\\small\\color{textgray}\\textit{${escapeLatex(studentName)} --- ${escapeLatex(schoolName)}}}
 \\fancyfoot[C]{\\small\\color{textgray}\\thepage}
-\\fancyfoot[R]{\\scriptsize\\color{textgray}AEE+ PRO}
+\\fancyfoot[R]{}
 \\renewcommand{\\headrulewidth}{0.4pt}
 \\renewcommand{\\footrulewidth}{0.2pt}
 \\renewcommand{\\headrule}{\\hbox to\\headwidth{\\color{aeegold}\\leaders\\hrule height \\headrulewidth\\hfill}}
