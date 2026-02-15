@@ -232,7 +232,7 @@ REGRAS CRÍTICAS:
 6. Use --- para travessão, -- para meia-risca.
 7. NÃO use \\includegraphics — não há imagens disponíveis. Use TikZ para qualquer elemento visual.
 8. Em TikZ: sempre nomeie nodes com texto (ex: \\node (meunode) {...}), NUNCA use números puros como nome de node.
-9. NÃO use TikZ mindmap (a biblioteca não está disponível). Para diagramas conceituais, use nodes com setas e positioning.
+9. NÃO use TikZ mindmap nem child trees. Para diagramas conceituais, use nodes individuais com positioning e setas (\\draw[-Latex]). Exemplo: \\node[draw,fill=aeeblue!20] (A) {Texto}; \\node[right=of A] (B) {Texto2}; \\draw[-Latex] (A)--(B);
 10. A data de hoje é ${today}.
 11. \\rowcolor DEVE ser o PRIMEIRO comando de uma linha de tabela (antes de qualquer &). NUNCA coloque \\rowcolor depois de &.
 12. Em tabelas, use \\makecell{linha1 \\\\ linha2} para quebrar texto dentro de uma célula. NUNCA use \\\\ solto dentro de uma célula.
@@ -245,7 +245,8 @@ REGRAS CRÍTICAS:
   - NÃO use condicionais TeX: \\ifnum, \\ifdim, \\ifx, \\ifodd, \\ifcase, \\or, \\else, \\fi.
   - NÃO use \\foreach com rnd (aleatoriedade) — círculos decorativos aleatórios SEMPRE falham.
   - NÃO use \\pgfmathparse inline em especificações de cor (ex: \\fill[cor!\\pgfmathresult!white]).
-  - NÃO use \\begin{axis} nem pgfplots para gráficos. Em vez disso, use TABELAS com booktabs e ícones para representar dados visuais, ou diagramas TikZ simples com nodes e shapes.
+  - NÃO use \\begin{axis} nem pgfplots para gráficos. Em vez disso, use TABELAS com booktabs e ícones para representar dados visuais, ou diagramas TikZ simples com nodes e arrows.
+  - NÃO use TikZ child trees (sintaxe "child {node ...}") para diagramas de árvore/mind map — o layout fica péssimo com texto longo. Use nodes com positioning e setas (\\draw[-Latex]) em vez disso.
   - NÃO coloque longtable dentro de adjustbox, tcolorbox ou qualquer grupo — longtable DEVE estar no nível raiz do documento. Use tabular dentro de adjustbox se precisar redimensionar.
   - NÃO use colunas X em longtable — X é exclusivo de tabularx.
   - NÃO use \\multirowcell — use \\multirow{N}{*}{texto}.

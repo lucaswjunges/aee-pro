@@ -77,10 +77,8 @@ export function sanitizeLatexSource(source: string): string {
   );
 
   // Layer 4: Remove tikzpicture blocks containing pgfplots \begin{axis}
-  // The AI generates radar charts, bar charts, etc. using pgfplots options
-  // (radar M, axis lines, etc.) that often depend on unavailable packages
-  // or contain blank lines inside axis (causing "Paragraph ended" errors).
-  result = removePgfplotsBlocks(result);
+  // or TikZ child trees (mind maps) — both produce terrible visual output.
+  result = removeProblematicTikzBlocks(result);
 
   // Layer 5: Replace \pgfmathparse...\pgfmathresult inline color specs
   result = result.replace(
@@ -185,16 +183,13 @@ function removeProblematicForeach(source: string): string {
  * - Orphaned condition fragments like "\c = 1 \relax"
  */
 /**
- * Remove tikzpicture blocks that contain pgfplots \begin{axis}.
- *
- * The AI generates charts (radar, bar, etc.) using pgfplots that often:
- * - Use unavailable packages/options (radar M, spider web, etc.)
- * - Contain blank lines inside axis environments ("Paragraph ended" error)
- * - Depend on data that doesn't exist
+ * Remove tikzpicture blocks that contain:
+ * 1. pgfplots \begin{axis} — charts with unavailable packages/options
+ * 2. TikZ child trees — mind-map-like diagrams that overflow and look terrible
  *
  * These are always decorative — removing them doesn't lose document content.
  */
-function removePgfplotsBlocks(source: string): string {
+function removeProblematicTikzBlocks(source: string): string {
   let result = source;
   const beginTag = "\\begin{tikzpicture}";
   const endTag = "\\end{tikzpicture}";
@@ -226,8 +221,11 @@ function removePgfplotsBlocks(source: string): string {
 
     const block = result.substring(startIdx, endIdx);
 
-    if (block.includes("\\begin{axis}")) {
-      // Remove entire tikzpicture block with pgfplots axis
+    const isProblematic =
+      block.includes("\\begin{axis}") || // pgfplots
+      /\bchild\s*\{/.test(block);        // TikZ child trees (mind maps)
+
+    if (isProblematic) {
       const lineStart = result.lastIndexOf("\n", startIdx) + 1;
       const lineEnd = endIdx < result.length && result[endIdx] === "\n" ? endIdx + 1 : endIdx;
       result = result.substring(0, lineStart) + result.substring(lineEnd);
