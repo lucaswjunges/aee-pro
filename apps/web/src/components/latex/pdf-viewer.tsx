@@ -13,12 +13,14 @@ interface PdfViewerProps {
  * iframes. We detect this and show open/download buttons instead.
  */
 function canEmbedPdf(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const nav: Record<string, unknown> = navigator as never;
   // navigator.pdfViewerEnabled is the standard API (Chrome 94+, Firefox 99+, Safari 16.4+)
-  if (typeof navigator !== "undefined" && "pdfViewerEnabled" in navigator) {
-    return navigator.pdfViewerEnabled as boolean;
+  if (typeof nav.pdfViewerEnabled === "boolean") {
+    return nav.pdfViewerEnabled;
   }
   // Fallback heuristic: desktop browsers generally can, mobile generally can't
-  return !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  return !/Android|iPhone|iPad|iPod/i.test(String(nav.userAgent ?? ""));
 }
 
 export function PdfViewer({ documentId, className }: PdfViewerProps) {

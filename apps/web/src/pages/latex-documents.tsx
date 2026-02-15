@@ -35,7 +35,7 @@ export function LatexDocumentsPage() {
   const hasInProgress = documents.some(
     (d) => d.status === "generating" || d.status === "compiling",
   );
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   useEffect(() => {
     if (hasInProgress) {
       pollRef.current = setInterval(fetchData, 3000);

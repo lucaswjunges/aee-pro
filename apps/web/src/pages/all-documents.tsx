@@ -224,7 +224,7 @@ export function AllDocumentsPage() {
                   <div className="flex items-center gap-1.5">
                     <p className="font-medium text-sm truncate">{doc.title}</p>
                     {doc.kind === "latex" && (
-                      <FileCode className="h-3.5 w-3.5 shrink-0 text-muted-foreground" title="Documento LaTeX" />
+                      <FileCode className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">

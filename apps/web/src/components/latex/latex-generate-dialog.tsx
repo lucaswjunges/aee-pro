@@ -23,7 +23,7 @@ export function LatexGenerateDialog({
   studentName,
   onGenerated,
 }: LatexGenerateDialogProps) {
-  const [documentType, setDocumentType] = useState(LATEX_DOCUMENT_TYPES[0].slug);
+  const [documentType, setDocumentType] = useState<string>(LATEX_DOCUMENT_TYPES[0].slug);
   const [heatLevel, setHeatLevel] = useState(3);
   const [sizeLevel, setSizeLevel] = useState(3);
   const [customPrompt, setCustomPrompt] = useState("");
