@@ -14,8 +14,8 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex h-14 items-center px-4 gap-4">
-        <Link to="/" className="font-bold text-lg">
-          AEE+ PRO
+        <Link to="/" className="flex items-center gap-2">
+          <img src="/logo.png" alt="AEE+ PRO" className="h-8" />
         </Link>
 
         {!isMobile && (

@@ -30,7 +30,7 @@ export function LoginPage() {
       </div>
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">AEE+ PRO</CardTitle>
+          <img src="/logo.png" alt="AEE+ PRO" className="h-12 mx-auto mb-2" />
           <CardDescription>Entre com sua conta para continuar</CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
