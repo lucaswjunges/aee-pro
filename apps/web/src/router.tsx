@@ -14,6 +14,7 @@ import { LatexDocumentViewPage } from "@/pages/latex-document-view";
 import { SettingsPage } from "@/pages/settings";
 import { PromptsPage } from "@/pages/prompts";
 import { PrivacyPage } from "@/pages/privacy";
+import { AllDocumentsPage } from "@/pages/all-documents";
 import { NotFoundPage } from "@/pages/not-found";
 
 function GuestRoute({ children }: { children: React.ReactNode }) {
@@ -57,6 +58,7 @@ export function AppRouter() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="documentos" element={<AllDocumentsPage />} />
         <Route path="alunos" element={<StudentsPage />} />
         <Route path="alunos/novo" element={<StudentNewPage />} />
         <Route path="alunos/:id/editar" element={<StudentEditPage />} />

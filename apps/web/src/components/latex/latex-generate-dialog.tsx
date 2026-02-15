@@ -26,6 +26,8 @@ export function LatexGenerateDialog({
   const [documentType, setDocumentType] = useState(LATEX_DOCUMENT_TYPES[0].slug);
   const [heatLevel, setHeatLevel] = useState(3);
   const [sizeLevel, setSizeLevel] = useState(3);
+  const [customPrompt, setCustomPrompt] = useState("");
+  const [unlimitedTokens, setUnlimitedTokens] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,12 +40,13 @@ export function LatexGenerateDialog({
       documentType,
       heatLevel,
       sizeLevel,
+      customPrompt: customPrompt.trim() || undefined,
+      unlimitedTokens,
     });
 
     setSubmitting(false);
 
     if (res.success) {
-      // Close dialog — polling on the list page handles status updates
       onGenerated();
       handleClose();
     } else {
@@ -90,8 +93,36 @@ export function LatexGenerateDialog({
         {/* Size slider */}
         <SizeSlider value={sizeLevel} onChange={setSizeLevel} disabled={submitting} />
 
+        {/* Unlimited tokens */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={unlimitedTokens}
+            onChange={(e) => setUnlimitedTokens(e.target.checked)}
+            disabled={submitting}
+            className="rounded border-input"
+          />
+          <span className="text-sm">Usar máximo de tokens</span>
+          <span className="text-xs text-muted-foreground">(documento mais completo, consome mais)</span>
+        </label>
+
+        {/* Custom prompt */}
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">
+            Instruções adicionais <span className="text-muted-foreground font-normal">(opcional)</span>
+          </label>
+          <textarea
+            value={customPrompt}
+            onChange={(e) => setCustomPrompt(e.target.value)}
+            disabled={submitting}
+            placeholder="Ex: Incluir seção sobre comunicação alternativa. Destacar habilidades em artes..."
+            rows={3}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground disabled:opacity-50 resize-none"
+          />
+        </div>
+
         {/* Token usage hint */}
-        {(heatLevel + sizeLevel) >= 8 && (
+        {(heatLevel + sizeLevel) >= 8 && !unlimitedTokens && (
           <p className="text-xs text-muted-foreground">
             Combinação alta — consome mais tokens. Providers gratuitos podem truncar o resultado.
           </p>

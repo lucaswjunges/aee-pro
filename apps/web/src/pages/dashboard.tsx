@@ -82,31 +82,35 @@ export function DashboardPage() {
 
       {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Alunos</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {loading ? <Skeleton className="h-8 w-12" /> : stats?.totalStudents ?? 0}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">cadastrados</p>
-          </CardContent>
-        </Card>
+        <Link to="/alunos">
+          <Card className="cursor-pointer hover:bg-accent/50 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Alunos</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {loading ? <Skeleton className="h-8 w-12" /> : stats?.totalStudents ?? 0}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">cadastrados</p>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Documentos</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {loading ? <Skeleton className="h-8 w-12" /> : stats?.totalDocuments ?? 0}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">gerados no total</p>
-          </CardContent>
-        </Card>
+        <Link to="/documentos">
+          <Card className="cursor-pointer hover:bg-accent/50 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Documentos</CardTitle>
+              <FileText className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {loading ? <Skeleton className="h-8 w-12" /> : stats?.totalDocuments ?? 0}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">gerados no total</p>
+            </CardContent>
+          </Card>
+        </Link>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
