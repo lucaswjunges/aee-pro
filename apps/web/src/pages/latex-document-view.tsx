@@ -100,6 +100,9 @@ export function LatexDocumentViewPage() {
 
   const handleRecompile = async () => {
     if (!docId || !document) return;
+    if (document.status === "completed") {
+      if (!confirm("O PDF atual será perdido e recompilado. Tem certeza?")) return;
+    }
     // Save first if source changed
     if (editedSource !== document.latexSource) {
       await api.put(`/latex-documents/${docId}`, { latexSource: editedSource });
