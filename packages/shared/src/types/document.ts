@@ -37,6 +37,7 @@ export interface LatexDocument {
   aiModel: string | null;
   compilationAttempts: number;
   lastCompilationError: string | null;
+  compilationWarnings: string | null;
   generatedAt: string | null;
   createdAt: string;
   updatedAt: string;

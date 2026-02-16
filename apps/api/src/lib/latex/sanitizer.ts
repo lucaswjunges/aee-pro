@@ -119,6 +119,20 @@ export function sanitizeLatexSource(source: string): string {
   // creating unreadable narrow columns. Fix: use \linewidth instead.
   result = fixTabularxInsideBoxes(result);
 
+  // Layer 10: Wrap narrow-column tables (4+ cols of l/c/r) in adjustbox.
+  // AI generates tabular with many l/c/r columns containing long text,
+  // which is the #1 cause of Overfull \hbox warnings.
+  result = fixNarrowColumnTables(result);
+
+  // Layer 11: Add \sloppy inside tcolorbox environments.
+  // tcolorbox has narrower width than \textwidth, causing frequent
+  // Overfull \hbox. \sloppy allows more aggressive line breaking.
+  result = addSloppyToTcolorbox(result);
+
+  // Layer 12: Convert l columns to p{} in tables inside tcolorbox/adjustbox
+  // when there are 3+ l columns (likely long text that will overflow).
+  result = fixTabularColumnOverflow(result);
+
   // Layer 6: Close unclosed environments before \end{document}
   // AI output is often truncated, leaving environments open.
   result = closeUnclosedEnvironments(result);
@@ -713,6 +727,174 @@ function fixTabularxInsideBoxes(source: string): string {
     />\{\\hsize=[^}]*\\hsize\}\s*X/g,
     "X",
   );
+
+  return result;
+}
+
+/**
+ * Wrap tables (tabular or tabularx) with 3+ columns using only l/c/r in adjustbox.
+ * These tables are the #1 cause of Overfull \hbox — the AI generates many
+ * narrow columns with long text that overflows the page.
+ *
+ * Also catches tabularx where the AI used l/c/r instead of X columns
+ * (defeating the purpose of tabularx).
+ *
+ * Only wraps if not already inside an adjustbox.
+ */
+function fixNarrowColumnTables(source: string): string {
+  let result = source;
+  // Match both \begin{tabular}{colspec} and \begin{tabularx}{width}{colspec}
+  const patterns = [
+    { regex: /\\begin\{tabular\}\{([^}]*)\}/g, envName: "tabular" },
+    { regex: /\\begin\{tabularx\}\{[^}]*\}\{([^}]*)\}/g, envName: "tabularx" },
+  ];
+
+  const replacements: { start: number; end: number; wrapped: string }[] = [];
+
+  for (const { regex, envName } of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(result)) !== null) {
+      const colspec = match[1];
+
+      // Count l/c/r columns (excluding p{}, m{}, b{}, X, |, @{}, etc.)
+      const cleanedCols = colspec.replace(/>?\{[^}]*\}/g, "").replace(/[|]/g, "");
+      const lcrCount = (cleanedCols.match(/[lcr]/g) || []).length;
+      const hasWideCols = /[pmbX]/.test(cleanedCols);
+
+      // Only fix tables with 3+ narrow columns and no wide columns
+      if (lcrCount < 3 || hasWideCols) continue;
+
+      // Check if already inside adjustbox (look back ~100 chars)
+      const before = result.substring(Math.max(0, match.index - 100), match.index);
+      if (before.includes("adjustbox")) continue;
+
+      // Find matching \end{envName}
+      const beginTag = `\\begin{${envName}}`;
+      const endTag = `\\end{${envName}}`;
+      let depth = 1;
+      let idx = match.index + match[0].length;
+      while (depth > 0 && idx < result.length) {
+        const nextBegin = result.indexOf(beginTag, idx);
+        const nextEnd = result.indexOf(endTag, idx);
+        if (nextEnd === -1) break;
+        if (nextBegin !== -1 && nextBegin < nextEnd) {
+          depth++;
+          idx = nextBegin + beginTag.length;
+        } else {
+          depth--;
+          idx = nextEnd + endTag.length;
+        }
+      }
+
+      if (depth !== 0) continue;
+
+      const block = result.substring(match.index, idx);
+      const wrapped =
+        "\\begin{adjustbox}{max width=\\linewidth}\n" +
+        block +
+        "\n\\end{adjustbox}";
+
+      replacements.push({ start: match.index, end: idx, wrapped });
+    }
+  }
+
+  // Sort by start position descending, apply in reverse to preserve indices
+  replacements.sort((a, b) => b.start - a.start);
+  for (const r of replacements) {
+    result = result.substring(0, r.start) + r.wrapped + result.substring(r.end);
+  }
+
+  return result;
+}
+
+/**
+ * Add \sloppy at the beginning of tcolorbox environments.
+ * tcolorbox has narrower inner width than \textwidth, which causes frequent
+ * Overfull \hbox warnings. \sloppy allows TeX to stretch/shrink spaces more
+ * aggressively to avoid overflow.
+ *
+ * Skips boxes that already have \sloppy.
+ */
+function addSloppyToTcolorbox(source: string): string {
+  // Match \begin{env}, optional [arg], and optional {mandatory arg} on same line.
+  // The {mandatory arg} is needed for atividadebox which takes [color]{title} —
+  // inserting \sloppy between them would break tcolorbox argument parsing.
+  const envPattern = new RegExp(
+    `\\\\begin\\{(${TCOLORBOX_ENVS})\\}(\\[[^\\]]*\\])?(\\{[^}\\n]*\\})?`,
+    "g",
+  );
+
+  return source.replace(envPattern, (fullMatch, _envName, _optArg, _mandArg, offset: number) => {
+    // Check if \sloppy already follows on the next line
+    const afterIdx = offset + fullMatch.length;
+    const nextChars = source.substring(afterIdx, afterIdx + 20).trimStart();
+    if (nextChars.startsWith("\\sloppy")) return fullMatch;
+
+    return fullMatch + "\n\\sloppy";
+  });
+}
+
+/**
+ * Convert l columns to proportional p{} widths in tabular/tabularx inside
+ * tcolorbox or adjustbox, when the table has 3+ l columns (likely long text).
+ *
+ * Heuristic: tables inside containers with many l columns usually have
+ * text that overflows. Using p{} columns forces line wrapping.
+ */
+function fixTabularColumnOverflow(source: string): string {
+  let result = source;
+
+  // Find tabular/tabularx inside tcolorbox environments
+  const tcolorboxEnvs = TCOLORBOX_ENVS.split("|");
+  for (const env of tcolorboxEnvs) {
+    const beginEnv = `\\begin{${env}}`;
+    const endEnv = `\\end{${env}}`;
+    let cursor = 0;
+    let safety = 0;
+
+    while (safety++ < 30) {
+      const envStart = result.indexOf(beginEnv, cursor);
+      if (envStart === -1) break;
+
+      const envEnd = result.indexOf(endEnv, envStart);
+      if (envEnd === -1) break;
+
+      const envBlock = result.substring(envStart, envEnd);
+
+      // Find tabular or tabularx inside this env block
+      const tabMatch = envBlock.match(/\\begin\{tabular(?:x)?\}(?:\{[^}]*\})?\{([^}]*)\}/);
+      if (tabMatch) {
+        const colspec = tabMatch[1];
+        // Count l columns
+        const cleanedCols = colspec.replace(/>?\{[^}]*\}/g, "").replace(/[|]/g, "");
+        const lCount = (cleanedCols.match(/l/g) || []).length;
+        const totalCols = (cleanedCols.match(/[lcr]/g) || []).length;
+
+        // Only fix if 3+ l columns and no p{}/X columns already
+        if (lCount >= 3 && !/[pmbX]/.test(cleanedCols)) {
+          // Calculate proportional width: distribute \linewidth among columns
+          const colWidth = (0.95 / totalCols).toFixed(2);
+          const newColspec = colspec.replace(
+            /(?<![a-zA-Z])l(?![a-zA-Z])/g,
+            `p{${colWidth}\\linewidth}`,
+          );
+
+          const oldColspecStr = `{${colspec}}`;
+          const newColspecStr = `{${newColspec}}`;
+          const relPos = envBlock.indexOf(oldColspecStr);
+          if (relPos !== -1) {
+            const absPos = envStart + relPos;
+            result =
+              result.substring(0, absPos) +
+              newColspecStr +
+              result.substring(absPos + oldColspecStr.length);
+          }
+        }
+      }
+
+      cursor = envStart + beginEnv.length;
+    }
+  }
 
   return result;
 }

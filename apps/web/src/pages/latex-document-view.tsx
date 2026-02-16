@@ -10,6 +10,9 @@ import {
   RefreshCw,
   Wand2,
   Loader2,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import type { LatexDocument } from "@aee-pro/shared";
 import { HEAT_LEVELS, SIZE_LEVELS } from "@aee-pro/shared";
@@ -25,6 +28,41 @@ import { VOCE_SABIA } from "@/lib/voce-sabia";
 
 type ViewMode = "pdf" | "code" | "chat";
 
+function CompilationWarnings({ warnings }: { warnings: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Deduplicate and count repeated warnings
+  const grouped = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const w of warnings) {
+      counts.set(w, (counts.get(w) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([msg, count]) => ({ msg, count }));
+  }, [warnings]);
+
+  return (
+    <div className="rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 print:hidden">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-300"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        <span>{warnings.length} {warnings.length === 1 ? "aviso" : "avisos"} de compilação</span>
+        {expanded ? <ChevronUp className="ml-auto h-4 w-4" /> : <ChevronDown className="ml-auto h-4 w-4" />}
+      </button>
+      {expanded && (
+        <ul className="border-t border-amber-200 dark:border-amber-800 px-3 py-2 space-y-1">
+          {grouped.map((g, i) => (
+            <li key={i} className="text-xs text-amber-700 dark:text-amber-400 font-mono break-all">
+              {g.count > 1 ? `(${g.count}x) ${g.msg}` : g.msg}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function LatexDocumentViewPage() {
   const { id, docId } = useParams<{ id: string; docId: string }>();
@@ -293,6 +331,19 @@ export function LatexDocumentViewPage() {
           onFixWithAI={handleFixWithAI}
         />
       )}
+
+      {/* Compilation warnings */}
+      {(() => {
+        const warnings: string[] = (() => {
+          try {
+            return document.compilationWarnings ? JSON.parse(document.compilationWarnings) : [];
+          } catch {
+            return [];
+          }
+        })();
+        if (warnings.length === 0) return null;
+        return <CompilationWarnings warnings={warnings} />;
+      })()}
 
       {/* Main content */}
       {viewMode === "pdf" && document.status === "completed" && (

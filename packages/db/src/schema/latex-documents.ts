@@ -23,6 +23,7 @@ export const latexDocuments = sqliteTable("latex_documents", {
   aiModel: text("ai_model"),
   compilationAttempts: integer("compilation_attempts").default(0),
   lastCompilationError: text("last_compilation_error"),
+  compilationWarnings: text("compilation_warnings"),
   generatedAt: text("generated_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),

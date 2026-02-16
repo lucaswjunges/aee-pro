@@ -35,7 +35,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
   bottom=2.5cm,
   left=2.5cm,
   right=2.5cm,
-  headheight=15pt
+  headheight=28pt
 ]{geometry}
 
 % --- Colors ---

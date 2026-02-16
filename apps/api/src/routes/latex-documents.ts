@@ -274,6 +274,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
             pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
             status: "completed",
             compilationAttempts: compileResult.attempts,
+            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
             lastCompilationError: null,
             updatedAt: new Date().toISOString(),
           })
@@ -285,6 +286,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
             latexSource: compileResult.latexSource,
             status: "compile_error",
             compilationAttempts: compileResult.attempts,
+            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
             lastCompilationError: compileResult.lastError ?? "Unknown compilation error",
             updatedAt: new Date().toISOString(),
           })
@@ -326,6 +328,7 @@ latexDocumentRoutes.get("/", async (c) => {
       aiModel: latexDocuments.aiModel,
       compilationAttempts: latexDocuments.compilationAttempts,
       lastCompilationError: latexDocuments.lastCompilationError,
+      compilationWarnings: latexDocuments.compilationWarnings,
       generatedAt: latexDocuments.generatedAt,
       createdAt: latexDocuments.createdAt,
       updatedAt: latexDocuments.updatedAt,
@@ -559,6 +562,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
             pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
             status: "completed",
             compilationAttempts: (doc.compilationAttempts ?? 0) + compileResult.attempts,
+            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
             lastCompilationError: null,
             updatedAt: new Date().toISOString(),
           })
@@ -569,6 +573,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
           .set({
             status: "compile_error",
             compilationAttempts: (doc.compilationAttempts ?? 0) + compileResult.attempts,
+            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
             lastCompilationError: compileResult.lastError ?? "Unknown error",
             updatedAt: new Date().toISOString(),
           })
@@ -703,6 +708,7 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
             pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
             status: "completed",
             compilationAttempts: compileResult.attempts,
+            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
             lastCompilationError: null,
             updatedAt: new Date().toISOString(),
           })
@@ -714,6 +720,7 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
             latexSource: compileResult.latexSource,
             status: "compile_error",
             compilationAttempts: compileResult.attempts,
+            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
             lastCompilationError: compileResult.lastError ?? "Unknown error",
             updatedAt: new Date().toISOString(),
           })
@@ -953,6 +960,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
             pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
             status: "completed",
             compilationAttempts: compileResult.attempts,
+            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
             lastCompilationError: null,
             updatedAt: new Date().toISOString(),
           })
@@ -964,6 +972,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
             latexSource: compileResult.latexSource,
             status: "compile_error",
             compilationAttempts: compileResult.attempts,
+            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
             lastCompilationError: compileResult.lastError ?? "Unknown compilation error",
             updatedAt: new Date().toISOString(),
           })
