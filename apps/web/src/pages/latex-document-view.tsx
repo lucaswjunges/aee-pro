@@ -1,8 +1,9 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
   Download,
+  FileText,
   Printer,
   Code,
   Eye,
@@ -34,8 +35,9 @@ export function LatexDocumentViewPage() {
   const [recompiling, setRecompiling] = useState(false);
   const [saving, setSaving] = useState(false);
   const voceSabia = useMemo(() => VOCE_SABIA[Math.floor(Math.random() * VOCE_SABIA.length)], []);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchDocument = async () => {
+  const fetchDocument = useCallback(async () => {
     if (!docId) return;
     const res = await api.get<LatexDocument>(`/latex-documents/${docId}`);
     if (res.success && res.data) {
@@ -43,11 +45,30 @@ export function LatexDocumentViewPage() {
       setEditedSource(res.data.latexSource ?? "");
     }
     setLoading(false);
-  };
+  }, [docId]);
 
   useEffect(() => {
     fetchDocument();
-  }, [docId]);
+  }, [fetchDocument]);
+
+  // Auto-poll when document is in progress (generating/compiling)
+  useEffect(() => {
+    const isInProgress = document?.status === "generating" || document?.status === "compiling";
+    if (isInProgress) {
+      pollingRef.current = setInterval(fetchDocument, 3000);
+    } else {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    }
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [document?.status, fetchDocument]);
 
   const handleDownloadPdf = async () => {
     if (!docId) return;
@@ -63,6 +84,39 @@ export function LatexDocumentViewPage() {
     a.download = `${document?.title ?? "documento"}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const [docxLoading, setDocxLoading] = useState(false);
+
+  const handleDownloadDocx = async () => {
+    if (!docId) return;
+    setDocxLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/latex-documents/${docId}/export/docx`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        let msg = "Erro ao gerar DOCX";
+        try {
+          const err = await res.json();
+          if (err.error) msg = err.error;
+        } catch { /* ignore */ }
+        alert(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = window.document.createElement("a");
+      a.href = url;
+      a.download = `${document?.title ?? "documento"}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Erro ao conectar ao servidor para gerar DOCX.");
+    } finally {
+      setDocxLoading(false);
+    }
   };
 
   const handlePrint = () => {
@@ -85,13 +139,11 @@ export function LatexDocumentViewPage() {
     if (editedSource !== document.latexSource) {
       await api.put(`/latex-documents/${docId}`, { latexSource: editedSource });
     }
-    // Optimistic update: show "compiling" immediately
-    setDocument({ ...document, status: "compiling" });
     setRecompiling(true);
     const res = await api.post<LatexDocument>(`/latex-documents/${docId}/recompile`, {});
     if (res.success && res.data) {
       setDocument(res.data);
-      setEditedSource(res.data.latexSource ?? "");
+      setViewMode("pdf");
     }
     setRecompiling(false);
   };
@@ -102,8 +154,10 @@ export function LatexDocumentViewPage() {
       instruction,
     });
     if (res.success && res.data) {
+      // Update state immediately — polling will track progress
       setDocument(res.data);
       setEditedSource(res.data.latexSource ?? "");
+      setViewMode("pdf");
     } else {
       throw new Error(res.error ?? "Erro na edição");
     }
@@ -142,6 +196,7 @@ export function LatexDocumentViewPage() {
   };
 
   const status = statusConfig[document.status] ?? statusConfig.error;
+  const isProcessing = document.status === "generating" || document.status === "compiling";
   const heatName = HEAT_LEVELS.find((h) => h.level === document.heatLevel)?.name;
   const sizeName = SIZE_LEVELS.find((s) => s.level === document.sizeLevel)?.name;
 
@@ -183,8 +238,12 @@ export function LatexDocumentViewPage() {
             </Button>
           </>
         )}
-        {document.latexSource && (
+        {document.latexSource && !isProcessing && (
           <>
+            <Button variant="outline" size="sm" onClick={handleDownloadDocx} disabled={docxLoading}>
+              {docxLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileText className="h-4 w-4 mr-1" />}
+              DOCX
+            </Button>
             <Button
               variant={viewMode === "code" ? "default" : "outline"}
               size="sm"
@@ -280,9 +339,9 @@ export function LatexDocumentViewPage() {
         <div className="text-center py-12 text-muted-foreground print:hidden">
           <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3" />
           <p className="text-lg">
-            {document.status === "generating" ? "Gerando documento..." : "Compilando LaTeX..."}
+            {document.status === "generating" ? "Gerando documento com IA..." : "Compilando LaTeX..."}
           </p>
-          <p className="mt-2">Aguarde alguns instantes e recarregue a página.</p>
+          <p className="mt-2 text-sm">A página será atualizada automaticamente.</p>
           <div className="mt-6 mx-auto max-w-md rounded-lg border bg-muted/50 p-4 text-left">
             <p className="text-xs font-semibold text-foreground mb-1">Você sabia?</p>
             <p className="text-xs leading-relaxed">{voceSabia}</p>

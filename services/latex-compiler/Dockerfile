@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-lang-portuguese \
     texlive-science \
     lmodern \
+    pandoc \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -399,6 +399,80 @@ latexDocumentRoutes.get("/:id/pdf", async (c) => {
   return new Response(object.body, { headers });
 });
 
+// ---------- GET /:id/export/docx ----------
+
+latexDocumentRoutes.get("/:id/export/docx", async (c) => {
+  const userId = c.get("userId");
+  const id = c.req.param("id");
+  const db = createDb(c.env.DB);
+
+  const doc = await db
+    .select()
+    .from(latexDocuments)
+    .where(and(eq(latexDocuments.id, id), eq(latexDocuments.userId, userId)))
+    .get();
+
+  if (!doc) {
+    return c.json({ success: false, error: "Documento não encontrado" }, 404);
+  }
+
+  if (!doc.latexSource) {
+    return c.json({ success: false, error: "Documento sem código LaTeX" }, 400);
+  }
+
+  // Send LaTeX source to converter service (preprocessor + pandoc)
+  const compilerUrl = c.env.LATEX_COMPILER_URL;
+  const compilerToken = c.env.LATEX_COMPILER_TOKEN;
+
+  if (!compilerUrl) {
+    return c.json({ success: false, error: "Compilador LaTeX não configurado" }, 500);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${compilerUrl}/convert-docx`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${compilerToken}`,
+      },
+      body: JSON.stringify({ latex_source: doc.latexSource }),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return c.json({ success: false, error: `Erro ao conectar ao conversor: ${msg}` }, 502);
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    return c.json({ success: false, error: `Erro na conversão (${res.status}): ${text.slice(0, 500)}` }, 502);
+  }
+
+  const data = (await res.json()) as {
+    success: boolean;
+    docx_base64?: string;
+    docx_size_bytes?: number;
+    error?: string;
+  };
+
+  if (!data.success || !data.docx_base64) {
+    return c.json({ success: false, error: data.error ?? "Erro na conversão DOCX" }, 500);
+  }
+
+  const docxBuffer = Uint8Array.from(atob(data.docx_base64), (ch) => ch.charCodeAt(0));
+
+  const headers = new Headers();
+  headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  const safeFilename = doc.title.replace(/[^a-zA-Z0-9\s-]/g, "").replace(/\s+/g, "_") || "documento";
+  const utf8Filename = encodeURIComponent(doc.title.replace(/\s+/g, "_")) + ".docx";
+  headers.set(
+    "Content-Disposition",
+    `attachment; filename="${safeFilename}.docx"; filename*=UTF-8''${utf8Filename}`,
+  );
+
+  return new Response(docxBuffer, { headers });
+});
+
 // ---------- POST /:id/recompile ----------
 
 latexDocumentRoutes.post("/:id/recompile", async (c) => {
@@ -420,6 +494,14 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
     return c.json({ success: false, error: "Documento sem código LaTeX" }, 400);
   }
 
+  // Mark as compiling immediately and return
+  await db
+    .update(latexDocuments)
+    .set({ status: "compiling", updatedAt: new Date().toISOString() })
+    .where(eq(latexDocuments.id, id));
+
+  const updated = await db.select().from(latexDocuments).where(eq(latexDocuments.id, id)).get();
+
   // Get AI settings for auto-fix
   const settings = await db
     .select()
@@ -427,75 +509,85 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
     .where(eq(userSettings.userId, userId))
     .get();
 
-  await db
-    .update(latexDocuments)
-    .set({ status: "compiling", updatedAt: new Date().toISOString() })
-    .where(eq(latexDocuments.id, id));
+  const latexSource = doc.latexSource!;
 
-  let compileResult;
-
-  if (settings?.aiProvider && settings?.aiApiKeyEncrypted) {
-    // With auto-fix: AI can correct compilation errors
-    let apiKey: string;
+  const bgWork = (async () => {
     try {
-      apiKey = await decrypt(settings.aiApiKeyEncrypted, c.env.SESSION_SECRET);
-    } catch {
-      apiKey = "";
+      let compileResult;
+
+      if (settings?.aiProvider && settings?.aiApiKeyEncrypted) {
+        let apiKey: string;
+        try {
+          apiKey = await decrypt(settings.aiApiKeyEncrypted, c.env.SESSION_SECRET);
+        } catch {
+          apiKey = "";
+        }
+
+        if (apiKey) {
+          const provider = createAIProvider(settings.aiProvider, apiKey);
+          const model = normalizeModelForProvider(settings.aiModel || getLatexModel(settings.aiProvider), settings.aiProvider);
+          compileResult = await compileWithAutoFix(
+            latexSource,
+            c.env.LATEX_COMPILER_URL,
+            c.env.LATEX_COMPILER_TOKEN,
+            provider,
+            model,
+            getMaxTokens(doc.sizeLevel),
+          );
+        }
+      }
+
+      // Fallback: compile without auto-fix (still sanitize)
+      if (!compileResult) {
+        const sanitized = sanitizeLatexSource(latexSource);
+        const raw = await compileLatex(sanitized, c.env.LATEX_COMPILER_URL, c.env.LATEX_COMPILER_TOKEN);
+        compileResult = { ...raw, latexSource: sanitized, attempts: 1 };
+      }
+
+      if (compileResult.success && compileResult.pdfBase64) {
+        const r2Key = `latex-pdfs/${userId}/${id}.pdf`;
+        const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
+        await c.env.R2.put(r2Key, pdfBuffer, {
+          httpMetadata: { contentType: "application/pdf" },
+        });
+
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: compileResult.latexSource,
+            pdfR2Key: r2Key,
+            pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
+            status: "completed",
+            compilationAttempts: (doc.compilationAttempts ?? 0) + compileResult.attempts,
+            lastCompilationError: null,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, id));
+      } else {
+        await db
+          .update(latexDocuments)
+          .set({
+            status: "compile_error",
+            compilationAttempts: (doc.compilationAttempts ?? 0) + compileResult.attempts,
+            lastCompilationError: compileResult.lastError ?? "Unknown error",
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, id));
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Erro desconhecido";
+      await db
+        .update(latexDocuments)
+        .set({
+          status: "compile_error",
+          lastCompilationError: `Erro na compilação: ${errorMsg}`,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(latexDocuments.id, id));
     }
+  })();
 
-    if (apiKey) {
-      const provider = createAIProvider(settings.aiProvider, apiKey);
-      const model = normalizeModelForProvider(settings.aiModel || getLatexModel(settings.aiProvider), settings.aiProvider);
-      compileResult = await compileWithAutoFix(
-        doc.latexSource,
-        c.env.LATEX_COMPILER_URL,
-        c.env.LATEX_COMPILER_TOKEN,
-        provider,
-        model,
-        getMaxTokens(doc.sizeLevel),
-      );
-    }
-  }
-
-  // Fallback: compile without auto-fix (still sanitize)
-  if (!compileResult) {
-    const sanitized = sanitizeLatexSource(doc.latexSource);
-    const raw = await compileLatex(sanitized, c.env.LATEX_COMPILER_URL, c.env.LATEX_COMPILER_TOKEN);
-    compileResult = { ...raw, latexSource: sanitized, attempts: 1 };
-  }
-
-  if (compileResult.success && compileResult.pdfBase64) {
-    const r2Key = `latex-pdfs/${userId}/${id}.pdf`;
-    const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
-    await c.env.R2.put(r2Key, pdfBuffer, {
-      httpMetadata: { contentType: "application/pdf" },
-    });
-
-    await db
-      .update(latexDocuments)
-      .set({
-        latexSource: compileResult.latexSource,
-        pdfR2Key: r2Key,
-        pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
-        status: "completed",
-        compilationAttempts: (doc.compilationAttempts ?? 0) + compileResult.attempts,
-        lastCompilationError: null,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(latexDocuments.id, id));
-  } else {
-    await db
-      .update(latexDocuments)
-      .set({
-        status: "compile_error",
-        compilationAttempts: (doc.compilationAttempts ?? 0) + compileResult.attempts,
-        lastCompilationError: compileResult.lastError ?? "Unknown error",
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(latexDocuments.id, id));
-  }
-
-  const updated = await db.select().from(latexDocuments).where(eq(latexDocuments.id, id)).get();
+  c.executionCtx.waitUntil(bgWork);
   return c.json({ success: true, data: updated });
 });
 
@@ -538,92 +630,110 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
     return c.json({ success: false, error: "Erro ao descriptografar a chave de API" }, 500);
   }
 
+  // Mark as "generating" immediately and return — process in background
+  await db
+    .update(latexDocuments)
+    .set({ status: "generating", updatedAt: new Date().toISOString() })
+    .where(eq(latexDocuments.id, id));
+
+  const updated = await db.select().from(latexDocuments).where(eq(latexDocuments.id, id)).get();
+
   // Extract body from current source
   const startIdx = doc.latexSource.indexOf("\\begin{document}");
   const preamblePart = startIdx !== -1 ? doc.latexSource.substring(0, startIdx) : "";
   const bodyPart = startIdx !== -1 ? doc.latexSource.substring(startIdx) : doc.latexSource;
 
   const model = normalizeModelForProvider(settings.aiModel || getLatexModel(settings.aiProvider), settings.aiProvider);
-  const provider = createAIProvider(settings.aiProvider, apiKey);
+  const editAiProvider = settings.aiProvider!;
 
-  try {
-    const result = await provider.generate({
-      model,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Você é um especialista em LaTeX. Edite o corpo LaTeX seguindo a instrução do usuário. Retorne APENAS o corpo modificado (de \\begin{document} a \\end{document}), sem explicações, sem fence blocks. O preâmbulo é gerenciado externamente — não o inclua.",
-        },
-        {
-          role: "user",
-          content: `INSTRUÇÃO: ${body.instruction}\n\nCÓDIGO LATEX ATUAL:\n${bodyPart}`,
-        },
-      ],
-      maxTokens: 16000,
-      temperature: 0.5,
-    });
-
-    const editedBody = extractLatexBody(result.content);
-    const newSource = preamblePart + editedBody;
-
-    await db
-      .update(latexDocuments)
-      .set({
-        latexSource: newSource,
-        status: "compiling",
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(latexDocuments.id, id));
-
-    // Recompile
-    const compileResult = await compileWithAutoFix(
-      newSource,
-      c.env.LATEX_COMPILER_URL,
-      c.env.LATEX_COMPILER_TOKEN,
-      provider,
-      model,
-      getMaxTokens(doc.sizeLevel),
-    );
-
-    if (compileResult.success && compileResult.pdfBase64) {
-      const r2Key = `latex-pdfs/${userId}/${id}.pdf`;
-      const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
-      await c.env.R2.put(r2Key, pdfBuffer, {
-        httpMetadata: { contentType: "application/pdf" },
+  const bgWork = (async () => {
+    try {
+      const provider = createAIProvider(editAiProvider, apiKey);
+      const result = await provider.generate({
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Você é um especialista em LaTeX. Edite o corpo LaTeX seguindo a instrução do usuário. Retorne APENAS o corpo modificado (de \\begin{document} a \\end{document}), sem explicações, sem fence blocks. O preâmbulo é gerenciado externamente — não o inclua.",
+          },
+          {
+            role: "user",
+            content: `INSTRUÇÃO: ${body.instruction}\n\nCÓDIGO LATEX ATUAL:\n${bodyPart}`,
+          },
+        ],
+        maxTokens: getMaxTokens(doc.sizeLevel),
+        temperature: 0.5,
       });
+
+      const editedBody = extractLatexBody(result.content);
+      const newSource = preamblePart + editedBody;
 
       await db
         .update(latexDocuments)
         .set({
-          latexSource: compileResult.latexSource,
-          pdfR2Key: r2Key,
-          pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
-          status: "completed",
-          compilationAttempts: compileResult.attempts,
-          lastCompilationError: null,
+          latexSource: newSource,
+          status: "compiling",
           updatedAt: new Date().toISOString(),
         })
         .where(eq(latexDocuments.id, id));
-    } else {
+
+      // Recompile
+      const compileResult = await compileWithAutoFix(
+        newSource,
+        c.env.LATEX_COMPILER_URL,
+        c.env.LATEX_COMPILER_TOKEN,
+        provider,
+        model,
+        getMaxTokens(doc.sizeLevel),
+      );
+
+      if (compileResult.success && compileResult.pdfBase64) {
+        const r2Key = `latex-pdfs/${userId}/${id}.pdf`;
+        const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
+        await c.env.R2.put(r2Key, pdfBuffer, {
+          httpMetadata: { contentType: "application/pdf" },
+        });
+
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: compileResult.latexSource,
+            pdfR2Key: r2Key,
+            pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
+            status: "completed",
+            compilationAttempts: compileResult.attempts,
+            lastCompilationError: null,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, id));
+      } else {
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: compileResult.latexSource,
+            status: "compile_error",
+            compilationAttempts: compileResult.attempts,
+            lastCompilationError: compileResult.lastError ?? "Unknown error",
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, id));
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Erro desconhecido";
       await db
         .update(latexDocuments)
         .set({
-          latexSource: compileResult.latexSource,
-          status: "compile_error",
-          compilationAttempts: compileResult.attempts,
-          lastCompilationError: compileResult.lastError ?? "Unknown error",
+          status: "error",
+          lastCompilationError: `Erro na edição: ${errorMsg}`,
           updatedAt: new Date().toISOString(),
         })
         .where(eq(latexDocuments.id, id));
     }
+  })();
 
-    const updated = await db.select().from(latexDocuments).where(eq(latexDocuments.id, id)).get();
-    return c.json({ success: true, data: updated });
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : "Erro desconhecido";
-    return c.json({ success: false, error: `Erro na edição: ${errorMsg}` }, 500);
-  }
+  c.executionCtx.waitUntil(bgWork);
+  return c.json({ success: true, data: updated });
 });
 
 // ---------- PUT /:id ----------
