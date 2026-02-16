@@ -6,7 +6,7 @@ import { authMiddleware } from "../middleware/auth";
 import { decrypt } from "../lib/encryption";
 import { createAIProvider } from "../lib/ai/index";
 import { getLatexPreamble } from "../lib/latex/preamble";
-import { buildLatexPrompt } from "../lib/latex/prompt-builder";
+import { buildLatexPrompt, buildSignatureBlock } from "../lib/latex/prompt-builder";
 import { getLatexModel } from "../lib/latex/model-selection";
 import { getDocumentTypeConfig } from "../lib/latex/document-types";
 import { compileLatex } from "../lib/latex/compiler-client";
@@ -90,6 +90,22 @@ function sanitizeTruncatedLatex(latex: string): string {
   // The heavy lifting (closing unclosed environments) is now handled
   // by sanitizeLatexSource → closeUnclosedEnvironments
   return result;
+}
+
+/**
+ * Inject the signature block into the LaTeX body before \end{document}.
+ * Inserted BEFORE the LGPD footer (\vfill\begin{center}\scriptsize).
+ */
+function injectSignatureBlock(body: string, documentType: string, student: Record<string, string | null | undefined>): string {
+  const sig = buildSignatureBlock(documentType, student as Parameters<typeof buildSignatureBlock>[1]);
+  const endDocIdx = body.lastIndexOf("\\end{document}");
+  if (endDocIdx === -1) return body;
+
+  // Try to insert before the LGPD footer (\vfill ... \scriptsize)
+  const vfillIdx = body.lastIndexOf("\\vfill", endDocIdx);
+  const insertIdx = vfillIdx !== -1 ? vfillIdx : endDocIdx;
+
+  return body.substring(0, insertIdx) + "\n" + sig + "\n\n" + body.substring(insertIdx);
 }
 
 // ---------- POST /generate ----------
@@ -202,7 +218,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
         temperature: 0.7,
       });
 
-      const body_latex = extractLatexBody(result.content);
+      let body_latex = extractLatexBody(result.content);
 
       // Quality check: reject near-empty content
       const qualityError = checkContentQuality(body_latex);
@@ -213,6 +229,9 @@ latexDocumentRoutes.post("/generate", async (c) => {
           .where(eq(latexDocuments.id, docId));
         return;
       }
+
+      // Inject professional signature block before \end{document}
+      body_latex = injectSignatureBlock(body_latex, body.documentType, student);
 
       const preamble = getLatexPreamble({
         documentTitle: typeName,
@@ -768,7 +787,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
         temperature: 0.7,
       });
 
-      const bodyLatex = extractLatexBody(result.content);
+      let bodyLatex = extractLatexBody(result.content);
 
       // Quality check: reject near-empty content
       const qualityError = checkContentQuality(bodyLatex);
@@ -779,6 +798,9 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
           .where(eq(latexDocuments.id, newDocId));
         return;
       }
+
+      // Inject professional signature block before \end{document}
+      bodyLatex = injectSignatureBlock(bodyLatex, doc.documentType, student);
 
       const preamble = getLatexPreamble({
         documentTitle: typeName,

@@ -76,7 +76,13 @@ export function sanitizeLatexSource(source: string): string {
     "\\begin{$1}[",
   );
 
-  // Layer 4: Remove tikzpicture blocks containing pgfplots \begin{axis}
+  // Layer 4: Fix tcolorbox environments used as commands.
+  // AI sometimes writes \sessaobox[Title]{content} instead of
+  // \begin{sessaobox}[Title]...\end{sessaobox}. This breaks tcolorbox internals
+  // (tcb@savebox never closes).
+  result = fixTcolorboxAsCommand(result);
+
+  // Layer 5: Remove tikzpicture blocks containing pgfplots \begin{axis}
   // or TikZ child trees (mind maps) — both produce terrible visual output.
   result = removeProblematicTikzBlocks(result);
 
@@ -87,7 +93,17 @@ export function sanitizeLatexSource(source: string): string {
   );
   result = result.replace(/\\pgfmathresult/g, "0");
 
-  // Layer 5: Fix longtable issues
+  // Layer 5: Remove overlapping TikZ nodes.
+  // AI sometimes creates a header node and then overlays content at
+  // (header.center), causing text-on-text. Remove the overlay nodes.
+  result = removeOverlappingTikzNodes(result);
+
+  // Layer 6: Wrap tikzpicture in adjustbox to prevent overflow.
+  // TikZ diagrams can't break across pages and often overflow when
+  // the AI creates wide/tall node diagrams. adjustbox shrinks them.
+  result = wrapTikzInAdjustbox(result);
+
+  // Layer 6: Fix longtable issues
   // longtable inside adjustbox/tcolorbox/minipage causes \endgroup errors.
   // longtable with X columns (tabularx-only) also breaks.
   result = fixLongtableIssues(result);
@@ -95,6 +111,187 @@ export function sanitizeLatexSource(source: string): string {
   // Layer 6: Close unclosed environments before \end{document}
   // AI output is often truncated, leaving environments open.
   result = closeUnclosedEnvironments(result);
+
+  return result;
+}
+
+/**
+ * Fix tcolorbox environments incorrectly used as commands.
+ *
+ * The AI sometimes writes:  \sessaobox[Title]{content...}
+ * Instead of:               \begin{sessaobox}[Title]content...\end{sessaobox}
+ *
+ * The command form leaves tcolorbox's internal tcb@savebox open,
+ * causing "tcb@savebox ended by \end{document}" errors.
+ */
+const TCOLORBOX_ENVS = "infobox|alertbox|successbox|datacard|atividadebox|dicabox|materialbox|sessaobox";
+
+function fixTcolorboxAsCommand(source: string): string {
+  // Match: \envname  or  \envname[title]  followed by {
+  // But NOT \begin{envname} (which is correct usage)
+  const pattern = new RegExp(
+    `\\\\(${TCOLORBOX_ENVS})(\\[[^\\]]*\\])?\\s*\\{`,
+    "g",
+  );
+
+  let result = source;
+  let match: RegExpExecArray | null;
+  let safety = 0;
+
+  while (safety++ < 20) {
+    pattern.lastIndex = 0;
+    match = pattern.exec(result);
+    if (!match) break;
+
+    // Make sure this isn't inside a \begin{...} — check chars before match
+    const before = result.substring(Math.max(0, match.index - 7), match.index);
+    if (before.includes("begin{")) {
+      // This is \begin{sessaobox}[...]{  — a different issue, skip
+      // Actually \begin{env}[title] doesn't have {, but just in case
+      break;
+    }
+
+    const envName = match[1];
+    const optArg = match[2] || ""; // e.g. [Title]
+    const braceStart = match.index + match[0].length - 1; // position of {
+
+    // Find matching closing }
+    let depth = 1;
+    let idx = braceStart + 1;
+    while (depth > 0 && idx < result.length) {
+      if (result[idx] === "{") depth++;
+      else if (result[idx] === "}") depth--;
+      idx++;
+    }
+
+    if (depth !== 0) break; // unmatched brace, bail
+
+    const content = result.substring(braceStart + 1, idx - 1);
+    const replacement = `\\begin{${envName}}${optArg}\n${content}\n\\end{${envName}}`;
+
+    result =
+      result.substring(0, match.index) +
+      replacement +
+      result.substring(idx);
+  }
+
+  return result;
+}
+
+/**
+ * Wrap \begin{tikzpicture}...\end{tikzpicture} in \adjustbox{max width=\textwidth, max totalheight=0.45\textheight}
+ * so large TikZ diagrams (node trees, flowcharts) shrink to fit the page
+ * instead of overflowing and getting clipped.
+ *
+ * Skips tikzpictures already inside an adjustbox.
+ */
+function wrapTikzInAdjustbox(source: string): string {
+  const beginTag = "\\begin{tikzpicture}";
+  const endTag = "\\end{tikzpicture}";
+  let result = source;
+  let cursor = 0;
+  let safety = 0;
+
+  while (safety++ < 30) {
+    const startIdx = result.indexOf(beginTag, cursor);
+    if (startIdx === -1) break;
+
+    // Find matching \end{tikzpicture} handling nesting
+    let depth = 1;
+    let endIdx = startIdx + beginTag.length;
+    while (depth > 0 && endIdx < result.length) {
+      const nextBegin = result.indexOf(beginTag, endIdx);
+      const nextEnd = result.indexOf(endTag, endIdx);
+      if (nextEnd === -1) break;
+      if (nextBegin !== -1 && nextBegin < nextEnd) {
+        depth++;
+        endIdx = nextBegin + beginTag.length;
+      } else {
+        depth--;
+        endIdx = nextEnd + endTag.length;
+      }
+    }
+
+    if (depth !== 0) break;
+
+    // Check if already wrapped in adjustbox (look at ~60 chars before)
+    const before = result.substring(Math.max(0, startIdx - 80), startIdx);
+    if (before.includes("\\begin{adjustbox}") || before.includes("adjustbox")) {
+      cursor = endIdx;
+      continue;
+    }
+
+    // Only wrap tikzpictures with multiple \node (likely diagrams, not decorative)
+    const block = result.substring(startIdx, endIdx);
+    const nodeCount = (block.match(/\\node\b/g) || []).length;
+    if (nodeCount < 3) {
+      cursor = endIdx;
+      continue;
+    }
+
+    // Wrap in adjustbox
+    const wrapped =
+      "\\begin{adjustbox}{max width=\\textwidth, max totalheight=0.45\\textheight, center}\n" +
+      block +
+      "\n\\end{adjustbox}";
+
+    result = result.substring(0, startIdx) + wrapped + result.substring(endIdx);
+    cursor = startIdx + wrapped.length;
+  }
+
+  return result;
+}
+
+/**
+ * Remove TikZ overlay nodes that cause text-on-text.
+ *
+ * The AI sometimes creates a pattern like:
+ *   \node[box] (header) {Title};
+ *   \node[text width=3.5cm] at (header.center) { \begin{itemize}... };
+ *
+ * The second node is placed ON TOP of the first, causing overlapping text.
+ * We remove the overlay nodes entirely — the header nodes still provide
+ * a readable diagram structure.
+ */
+function removeOverlappingTikzNodes(source: string): string {
+  // Match: \node[...] at (somename.center) { ... };
+  // These are always overlay nodes meant to add content on top of another node.
+  // Need to handle multi-line content with nested braces.
+  let result = source;
+  const pattern = /\\node\s*\[[^\]]*\]\s*at\s*\([^)]*\.center\)\s*\{/g;
+  let match: RegExpExecArray | null;
+  let safety = 0;
+
+  while (safety++ < 30) {
+    pattern.lastIndex = 0;
+    match = pattern.exec(result);
+    if (!match) break;
+
+    const startIdx = match.index;
+    const braceStart = startIdx + match[0].length - 1;
+
+    // Find matching closing }
+    let depth = 1;
+    let idx = braceStart + 1;
+    while (depth > 0 && idx < result.length) {
+      if (result[idx] === "{") depth++;
+      else if (result[idx] === "}") depth--;
+      idx++;
+    }
+
+    if (depth !== 0) break;
+
+    // Find the trailing semicolon
+    let end = idx;
+    while (end < result.length && /\s/.test(result[end])) end++;
+    if (end < result.length && result[end] === ";") end++;
+
+    // Remove the line(s) including leading whitespace
+    const lineStart = result.lastIndexOf("\n", startIdx) + 1;
+    const lineEnd = end < result.length && result[end] === "\n" ? end + 1 : end;
+
+    result = result.substring(0, lineStart) + result.substring(lineEnd);
+  }
 
   return result;
 }
