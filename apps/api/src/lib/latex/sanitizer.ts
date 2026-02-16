@@ -113,6 +113,12 @@ export function sanitizeLatexSource(source: string): string {
   // longtable with X columns (tabularx-only) also breaks.
   result = fixLongtableIssues(result);
 
+  // Layer 9: Fix tabularx inside tcolorbox/adjustbox width issues.
+  // When tabularx{\textwidth} is inside a tcolorbox (which is narrower),
+  // the columns are calculated for full page width then get squeezed,
+  // creating unreadable narrow columns. Fix: use \linewidth instead.
+  result = fixTabularxInsideBoxes(result);
+
   // Layer 6: Close unclosed environments before \end{document}
   // AI output is often truncated, leaving environments open.
   result = closeUnclosedEnvironments(result);
@@ -619,6 +625,96 @@ function closeUnclosedEnvironments(source: string): string {
     .join("\n");
 
   return body + "\n" + closings + "\n" + tail;
+}
+
+/**
+ * Fix tabularx width issues inside tcolorbox/adjustbox.
+ *
+ * When AI generates \adjustbox{max width=\textwidth}{\begin{tabularx}{\textwidth}...},
+ * the tabularx calculates column widths for full page \textwidth, but adjustbox then
+ * shrinks the entire table to fit a narrower container (like a tcolorbox).
+ * This creates unreadable narrow columns (3-4 chars each).
+ *
+ * Fixes:
+ * 1. Remove \adjustbox wrapper around tabularx — tabularx already handles width.
+ * 2. Replace \textwidth with \linewidth in tabularx — \linewidth respects
+ *    the current container width (tcolorbox inner width).
+ */
+function fixTabularxInsideBoxes(source: string): string {
+  let result = source;
+
+  // Fix 1: Remove \adjustbox{...}{ ... \end{tabularx}} around tabularx.
+  // Strategy: find \adjustbox{options}{ that is followed (eventually) by \begin{tabularx},
+  // then find \end{tabularx} and its trailing }, remove the adjustbox wrapper.
+  let safety = 0;
+  while (safety++ < 20) {
+    // Find \adjustbox{...}{ followed by \begin{tabularx}
+    const m = result.match(
+      /\\adjustbox\{[^}]*\}\s*\{(\s*\\begin\{tabularx\})/,
+    );
+    if (!m || m.index === undefined) break;
+
+    const adjStart = m.index;
+    // Find the { that opens the adjustbox content group
+    // It's the { right before the whitespace+\begin{tabularx}
+    const prefixLen = m[0].length - m[1].length;
+    const outerBracePos = adjStart + prefixLen - 1;
+
+    // Verify it's actually a {
+    if (result[outerBracePos] !== "{") {
+      // Try to find it nearby
+      const searchStart = adjStart + "\\adjustbox{".length;
+      let pos = result.indexOf("}", searchStart);
+      if (pos === -1) break;
+      pos = result.indexOf("{", pos + 1);
+      if (pos === -1) break;
+
+      // Match from this brace
+      let depth = 1;
+      let idx = pos + 1;
+      while (depth > 0 && idx < result.length) {
+        if (result[idx] === "{") depth++;
+        else if (result[idx] === "}") depth--;
+        idx++;
+      }
+      if (depth !== 0) break;
+      const inner = result.substring(pos + 1, idx - 1).trim();
+      result = result.substring(0, adjStart) + inner + result.substring(idx);
+      continue;
+    }
+
+    // Find matching closing } for outer brace
+    let depth = 1;
+    let idx = outerBracePos + 1;
+    while (depth > 0 && idx < result.length) {
+      if (result[idx] === "{") depth++;
+      else if (result[idx] === "}") depth--;
+      idx++;
+    }
+    if (depth !== 0) break;
+
+    // Extract inner content (between outer braces)
+    const inner = result.substring(outerBracePos + 1, idx - 1).trim();
+    result = result.substring(0, adjStart) + inner + result.substring(idx);
+  }
+
+  // Fix 2: In tabularx, replace \textwidth with \linewidth
+  // This ensures the table respects the current container width
+  result = result.replace(
+    /\\begin\{tabularx\}\{\\textwidth\}/g,
+    "\\begin{tabularx}{\\linewidth}",
+  );
+
+  // Fix 3: Strip >{\hsize=N\hsize} modifiers from X columns.
+  // AI often generates \hsize multipliers that don't sum to the number of
+  // X columns (e.g. 1.5+1.5+1+1=5 for 4 columns), causing tabularx to
+  // miscalculate widths. Stripping them gives equal-width X columns.
+  result = result.replace(
+    />\{\\hsize=[^}]*\\hsize\}\s*X/g,
+    "X",
+  );
+
+  return result;
 }
 
 function stripTexConditionalMarkers(source: string): string {
