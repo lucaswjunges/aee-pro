@@ -3,7 +3,9 @@ import { compileLatex, type CompileResult } from "./compiler-client";
 import { sanitizeLatexSource, detectTruncation } from "./sanitizer";
 
 const MAX_FIX_ATTEMPTS = 3;
-const MAX_REFINE_PASSES = 3;
+const MAX_REFINE_PASSES = 2;
+/** Global timeout for the entire auto-fix pipeline (3 minutes). */
+const PIPELINE_TIMEOUT_MS = 3 * 60 * 1000;
 
 const AUTOFIX_SYSTEM_PROMPT = `Você é um especialista em LaTeX. O código abaixo falhou na compilação com pdflatex.
 
@@ -36,6 +38,23 @@ interface AutoFixResult {
  * @param maxTokens — token budget for AI responses (should match original generation).
  */
 export async function compileWithAutoFix(
+  initialSource: string,
+  compilerUrl: string,
+  compilerToken: string,
+  aiProvider: AIProvider,
+  aiModel: string,
+  maxTokens = 16000,
+): Promise<AutoFixResult> {
+  // Wrap entire pipeline in a timeout to prevent infinite hangs
+  return Promise.race([
+    compileWithAutoFixPipeline(initialSource, compilerUrl, compilerToken, aiProvider, aiModel, maxTokens),
+    new Promise<AutoFixResult>((_, reject) =>
+      setTimeout(() => reject(new Error("Pipeline de compilação excedeu o tempo limite (3 min)")), PIPELINE_TIMEOUT_MS),
+    ),
+  ]);
+}
+
+async function compileWithAutoFixPipeline(
   initialSource: string,
   compilerUrl: string,
   compilerToken: string,
