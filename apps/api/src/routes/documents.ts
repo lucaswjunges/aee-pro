@@ -11,7 +11,7 @@ import { getLatexPreamble } from "../lib/latex/preamble";
 import { compileLatex } from "../lib/latex/compiler-client";
 import { compileWithAutoFix } from "../lib/latex/auto-fix";
 import { sanitizeLatexSource } from "../lib/latex/sanitizer";
-import { getLatexModel } from "../lib/latex/model-selection";
+import { getLatexModel, normalizeModelForProvider } from "../lib/latex/model-selection";
 import { LATEX_DOCUMENT_TYPES } from "@aee-pro/shared";
 import type { Env } from "../index";
 
@@ -111,7 +111,7 @@ documentRoutes.post("/generate", async (c) => {
   // 5. Create document record (status: generating)
   const now = new Date().toISOString();
   const docId = crypto.randomUUID();
-  const model = settings.aiModel || getDefaultModel(settings.aiProvider);
+  const model = normalizeModelForProvider(settings.aiModel || getDefaultModel(settings.aiProvider), settings.aiProvider);
 
   await db.insert(documents).values({
     id: docId,
@@ -347,7 +347,7 @@ documentRoutes.post("/:id/regenerate", async (c) => {
 
   const now = new Date().toISOString();
   const newDocId = crypto.randomUUID();
-  const model = settings.aiModel || getDefaultModel(settings.aiProvider);
+  const model = normalizeModelForProvider(settings.aiModel || getDefaultModel(settings.aiProvider), settings.aiProvider);
 
   await db.insert(documents).values({
     id: newDocId,
@@ -441,7 +441,7 @@ documentRoutes.post("/:id/edit-ai", async (c) => {
     return c.json({ success: false, error: "Erro ao descriptografar a chave de API" }, 500);
   }
 
-  const model = settings.aiModel || getDefaultModel(settings.aiProvider);
+  const model = normalizeModelForProvider(settings.aiModel || getDefaultModel(settings.aiProvider), settings.aiProvider);
 
   try {
     const provider = createAIProvider(settings.aiProvider, apiKey);
@@ -615,7 +615,7 @@ documentRoutes.post("/:id/convert-to-latex", async (c) => {
 
   const studentName = student?.name ?? "Aluno";
   const schoolName = student?.school ?? "Escola";
-  const model = settings.aiModel || getLatexModel(settings.aiProvider);
+  const model = normalizeModelForProvider(settings.aiModel || getLatexModel(settings.aiProvider), settings.aiProvider);
 
   // Create LaTeX document record
   const now = new Date().toISOString();
