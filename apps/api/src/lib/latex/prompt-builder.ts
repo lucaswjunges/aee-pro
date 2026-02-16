@@ -277,44 +277,35 @@ export function buildSignatureBlock(
   lines.push(`\\noindent ${locationDate}`);
   lines.push(`\\vspace{1.5cm}`);
 
-  // Pair signatories in rows of 2
+  // Use a single tabularx to ensure all signatures are aligned at the same height.
+  // Each row has up to 2 signatories side by side.
+  lines.push(`\\begin{center}`);
+  lines.push(`\\begin{tabular}{p{0.42\\textwidth} p{0.42\\textwidth}}`);
+
   for (let i = 0; i < signatories.length; i += 2) {
     const left = signatories[i];
     const right = i + 1 < signatories.length ? signatories[i + 1] : null;
 
+    const leftName = left.name ? escapeLatexText(left.name) : "\\hspace{6cm}";
+    const leftCell =
+      `\\centering\\rule{6cm}{0.4pt}\\\\[4pt]` +
+      `\\textbf{${leftName}}\\\\` +
+      `\\small ${left.role}`;
+
     if (right) {
-      const leftName = left.name ? escapeLatexText(left.name) : "\\hspace{7cm}";
-      const rightName = right.name ? escapeLatexText(right.name) : "\\hspace{7cm}";
-      // CRITICAL: \noindent and both minipages must be one paragraph (no blank lines)
-      lines.push(
-        `\\noindent%\n` +
-        `\\begin{minipage}[t]{0.45\\textwidth}\n` +
-        `\\centering\n` +
-        `\\rule{7cm}{0.4pt}\\\\[4pt]\n` +
-        `\\textbf{${leftName}}\\\\\n` +
-        `\\small ${left.role}\n` +
-        `\\end{minipage}%\n` +
-        `\\hfill%\n` +
-        `\\begin{minipage}[t]{0.45\\textwidth}\n` +
-        `\\centering\n` +
-        `\\rule{7cm}{0.4pt}\\\\[4pt]\n` +
-        `\\textbf{${rightName}}\\\\\n` +
-        `\\small ${right.role}\n` +
-        `\\end{minipage}`,
-      );
+      const rightName = right.name ? escapeLatexText(right.name) : "\\hspace{6cm}";
+      const rightCell =
+        `\\centering\\rule{6cm}{0.4pt}\\\\[4pt]` +
+        `\\textbf{${rightName}}\\\\` +
+        `\\small ${right.role}`;
+      lines.push(`${leftCell} & ${rightCell} \\\\[1.2cm]`);
     } else {
-      // Odd signatory — centered alone
-      const leftName = left.name ? escapeLatexText(left.name) : "\\hspace{7cm}";
-      lines.push(
-        `\\begin{center}\n` +
-        `\\rule{7cm}{0.4pt}\\\\[4pt]\n` +
-        `\\textbf{${leftName}}\\\\\n` +
-        `\\small ${left.role}\n` +
-        `\\end{center}`,
-      );
+      lines.push(`${leftCell} & \\\\[1.2cm]`);
     }
-    lines.push(`\\vspace{0.8cm}`);
   }
+
+  lines.push(`\\end{tabular}`);
+  lines.push(`\\end{center}`);
 
   return lines.join("\n");
 }
