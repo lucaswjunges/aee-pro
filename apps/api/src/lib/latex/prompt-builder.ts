@@ -277,35 +277,28 @@ export function buildSignatureBlock(
   lines.push(`\\noindent ${locationDate}`);
   lines.push(`\\vspace{1.5cm}`);
 
-  // Use a single tabularx to ensure all signatures are aligned at the same height.
-  // Each row has up to 2 signatories side by side.
-  lines.push(`\\begin{center}`);
-  lines.push(`\\begin{tabular}{p{0.42\\textwidth} p{0.42\\textwidth}}`);
-
+  // Use minipages inside a center environment for side-by-side signature blocks.
+  // Each pair is on the same line via \noindent + minipage + \hfill + minipage.
   for (let i = 0; i < signatories.length; i += 2) {
     const left = signatories[i];
     const right = i + 1 < signatories.length ? signatories[i + 1] : null;
-
     const leftName = left.name ? escapeLatexText(left.name) : "\\hspace{6cm}";
-    const leftCell =
-      `\\centering\\rule{6cm}{0.4pt}\\\\[4pt]` +
-      `\\textbf{${leftName}}\\\\` +
-      `\\small ${left.role}`;
 
     if (right) {
       const rightName = right.name ? escapeLatexText(right.name) : "\\hspace{6cm}";
-      const rightCell =
-        `\\centering\\rule{6cm}{0.4pt}\\\\[4pt]` +
-        `\\textbf{${rightName}}\\\\` +
-        `\\small ${right.role}`;
-      lines.push(`${leftCell} & ${rightCell} \\\\[1.2cm]`);
+      // All on one line (no blank lines between minipages!) to stay in same paragraph
+      lines.push(
+        `\\noindent\\begin{minipage}[t]{0.45\\textwidth}\\centering\\rule{6cm}{0.4pt}\\\\[4pt]\\textbf{${leftName}}\\\\\\small ${left.role}\\end{minipage}%` +
+        `\\hfill%` +
+        `\\begin{minipage}[t]{0.45\\textwidth}\\centering\\rule{6cm}{0.4pt}\\\\[4pt]\\textbf{${rightName}}\\\\\\small ${right.role}\\end{minipage}`,
+      );
     } else {
-      lines.push(`${leftCell} & \\\\[1.2cm]`);
+      lines.push(
+        `\\begin{center}\\rule{6cm}{0.4pt}\\\\[4pt]\\textbf{${leftName}}\\\\\\small ${left.role}\\end{center}`,
+      );
     }
+    lines.push(`\\vspace{0.8cm}`);
   }
-
-  lines.push(`\\end{tabular}`);
-  lines.push(`\\end{center}`);
 
   return lines.join("\n");
 }
@@ -359,7 +352,7 @@ REGRAS CRÍTICAS:
 9. NÃO use TikZ mindmap nem child trees. Para diagramas conceituais, use nodes individuais com positioning e setas (\\draw[-Latex]). Exemplo: \\node[draw,fill=aeeblue!20] (A) {Texto}; \\node[right=of A] (B) {Texto2}; \\draw[-Latex] (A)--(B);
 10. A data de hoje é ${today}.
 11. \\rowcolor DEVE ser o PRIMEIRO comando de uma linha de tabela (antes de qualquer &). NUNCA coloque \\rowcolor depois de &.
-12. Em tabelas, use \\makecell{linha1 \\\\ linha2} para quebrar texto dentro de uma célula. NUNCA use \\\\ solto dentro de uma célula.
+12. Em tabelas, use \\makecell{linha1 \\\\ linha2} para quebrar texto CURTO dentro de uma célula. NUNCA coloque \\begin{itemize} ou \\begin{enumerate} dentro de \\makecell — causa erro "Not allowed in LR mode". Para listas dentro de tabelas, use colunas p{Xcm} ou X e coloque a lista diretamente na célula (sem makecell).
 13. Para multirow com texto longo, use \\multirow{N}{*}{texto} e NUNCA \\multirowcell.
 14. Em TikZ: use valores de coordenadas PEQUENOS (max 100). Dimensões muito grandes causam "Dimension too large". Para diagramas de nodes, use text width=4cm e node distance=10mm — diagramas TikZ NÃO quebram entre páginas, então DEVEM caber em MEIA PÁGINA no máximo.
 14b. Em TikZ: TODO o conteúdo de um node DEVE estar DENTRO do próprio node. NUNCA crie um node header e depois sobreponha outro node com \\node at (header.center). Isso causa texto sobreposto. Coloque o conteúdo completo (título + lista) dentro de UM ÚNICO node. Exemplo CORRETO: \\node[draw, text width=4cm] (A) {\\textbf{Título}\\\\\\begin{itemize}[leftmargin=*] \\item Item1 \\item Item2\\end{itemize}};

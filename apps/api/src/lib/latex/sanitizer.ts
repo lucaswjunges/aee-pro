@@ -103,7 +103,12 @@ export function sanitizeLatexSource(source: string): string {
   // the AI creates wide/tall node diagrams. adjustbox shrinks them.
   result = wrapTikzInAdjustbox(result);
 
-  // Layer 6: Fix longtable issues
+  // Layer 7: Fix \makecell containing itemize/enumerate.
+  // \makecell operates in LR mode which doesn't allow paragraph-mode
+  // environments like itemize. Strip \makecell wrapper, keep content.
+  result = fixMakecellWithLists(result);
+
+  // Layer 8: Fix longtable issues
   // longtable inside adjustbox/tcolorbox/minipage causes \endgroup errors.
   // longtable with X columns (tabularx-only) also breaks.
   result = fixLongtableIssues(result);
@@ -237,6 +242,58 @@ function wrapTikzInAdjustbox(source: string): string {
 
     result = result.substring(0, startIdx) + wrapped + result.substring(endIdx);
     cursor = startIdx + wrapped.length;
+  }
+
+  return result;
+}
+
+/**
+ * Fix \makecell containing \begin{itemize} or \begin{enumerate}.
+ *
+ * \makecell operates in LR mode which forbids paragraph-mode environments.
+ * This causes "Not allowed in LR mode" fatal errors.
+ *
+ * Fix: strip the \makecell wrapper, keeping the content bare inside the cell.
+ * This works when the column is p{} or X (paragraph mode).
+ */
+function fixMakecellWithLists(source: string): string {
+  // Match \makecell or \makecell[...] followed by {
+  const pattern = /\\makecell(\[[^\]]*\])?\s*\{/g;
+  let result = source;
+  let match: RegExpExecArray | null;
+  let safety = 0;
+
+  while (safety++ < 50) {
+    pattern.lastIndex = 0;
+    match = pattern.exec(result);
+    if (!match) break;
+
+    const fullMatchStart = match.index;
+    const braceStart = fullMatchStart + match[0].length - 1;
+
+    // Find matching closing }
+    let depth = 1;
+    let idx = braceStart + 1;
+    while (depth > 0 && idx < result.length) {
+      if (result[idx] === "{") depth++;
+      else if (result[idx] === "}") depth--;
+      idx++;
+    }
+    if (depth !== 0) break;
+
+    const content = result.substring(braceStart + 1, idx - 1);
+
+    // Only fix if content contains itemize or enumerate
+    if (!/\\begin\{(itemize|enumerate)\}/.test(content)) {
+      // Safe makecell — skip by advancing pattern
+      pattern.lastIndex = idx;
+      continue;
+    }
+
+    // Replace \makecell{content} with just content
+    // Also convert \\ line breaks to \newline (since we're now in paragraph mode)
+    const fixed = content.replace(/\\\\(?!\[)/g, "\\newline ");
+    result = result.substring(0, fullMatchStart) + fixed + result.substring(idx);
   }
 
   return result;
