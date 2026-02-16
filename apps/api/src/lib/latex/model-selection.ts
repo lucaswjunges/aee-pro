@@ -17,7 +17,7 @@ const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "gpt-4.1-mini": "openai/gpt-4.1-mini",
   "gpt-4o": "openai/gpt-4o",
   "gpt-4o-mini": "openai/gpt-4o-mini",
-  "gemini-2.5-flash": "google/gemini-2.5-flash-preview",
+  "gemini-2.5-flash": "google/gemini-2.5-flash-preview-05-20",
   "gemini-2.0-flash": "google/gemini-2.0-flash-001",
   "deepseek-chat": "deepseek/deepseek-chat",
   "command-r-plus": "cohere/command-r-plus",
@@ -28,8 +28,8 @@ const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "mistralai/mistral-small-latest": "mistralai/mistral-small",
   "anthropic/claude-sonnet-4-5-20250929": "anthropic/claude-sonnet-4-5",
   "anthropic/claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
-  "google/gemini-2.5-flash": "google/gemini-2.5-flash-preview",
-  "google/gemini-2.5-flash-preview-05-20": "google/gemini-2.5-flash-preview",
+  "google/gemini-2.5-flash": "google/gemini-2.5-flash-preview-05-20",
+  "google/gemini-2.5-flash-preview": "google/gemini-2.5-flash-preview-05-20",
 };
 
 /**
