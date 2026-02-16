@@ -63,7 +63,12 @@ export function DocumentViewPage() {
       const res = await fetch(`${API_BASE}/documents/${docId}/export/pdf`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!res.ok) throw new Error("Erro ao gerar PDF");
+      if (!res.ok) {
+        const text = await res.text();
+        let detail = "";
+        try { detail = JSON.parse(text).error; } catch { detail = text.substring(0, 200); }
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = window.document.createElement("a");
@@ -71,8 +76,9 @@ export function DocumentViewPage() {
       a.download = `${document?.title ?? "documento"}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch {
-      alert("Erro ao gerar PDF. Verifique se o compilador LaTeX está disponível.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro desconhecido";
+      alert(`Erro ao gerar PDF: ${msg}`);
     }
     setExportingPdf(false);
   };

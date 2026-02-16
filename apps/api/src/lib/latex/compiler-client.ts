@@ -11,14 +11,27 @@ export async function compileLatex(
   compilerUrl: string,
   compilerToken: string,
 ): Promise<CompileResult> {
-  const res = await fetch(`${compilerUrl}/compile`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${compilerToken}`,
-    },
-    body: JSON.stringify({ latex_source: latexSource }),
-  });
+  if (!compilerUrl) {
+    return { success: false, error: "LATEX_COMPILER_URL não configurado" };
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${compilerUrl}/compile`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${compilerToken}`,
+      },
+      body: JSON.stringify({ latex_source: latexSource }),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      error: `Compilador LaTeX indisponível (${compilerUrl}): ${msg}`,
+    };
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
