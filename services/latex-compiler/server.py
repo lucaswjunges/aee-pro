@@ -217,8 +217,33 @@ def _remove_adjustbox_cmd(text: str) -> str:
     return text
 
 
+def _extract_doc_title_from_preamble(source: str) -> tuple[str, str]:
+    """Extract document title and student name from fancyhead in preamble."""
+    title = ""
+    student = ""
+    begin_idx = source.find(r"\begin{document}")
+    preamble = source[:begin_idx] if begin_idx != -1 else ""
+    # \fancyhead[L]{\small\color{textgray}\textit{Sugestão de Atendimento}}
+    # Use .*? with DOTALL-safe approach — match \textit inside fancyhead[L] line
+    for line in preamble.split("\n"):
+        if r"\fancyhead[L]" in line:
+            m = re.search(r"\\textit\{([^}]+)\}", line)
+            if m:
+                title = m.group(1).strip()
+        elif r"\fancyhead[R]" in line:
+            m = re.search(r"\\textit\{([^}]+)\}", line)
+            if m:
+                student = m.group(1).strip()
+                if "---" in student:
+                    student = student.split("---")[0].strip()
+    return title, student
+
+
 def _preprocess_latex_for_pandoc(source: str) -> str:
     """Convert custom LaTeX to standard LaTeX that pandoc understands well."""
+
+    # 0) Extract title/student from preamble before stripping it
+    doc_title, doc_student = _extract_doc_title_from_preamble(source)
 
     # 1) Strip everything before \begin{document}
     begin_idx = source.find(r"\begin{document}")
@@ -259,11 +284,15 @@ def _preprocess_latex_for_pandoc(source: str) -> str:
     body = body.replace("\\end{atividadebox}", "\n")
 
     # 3) Handle other titled envs: \begin{env}[Title]
+    #    infobox/sessaobox → \section (H1) — these are major document sections
+    #    alertbox/successbox/dicabox → \subsection (H2) — these are minor callouts
+    _H1_ENVS = {"sessaobox", "infobox"}
     for env in ["sessaobox", "infobox", "alertbox", "successbox", "dicabox"]:
+        level = "section" if env in _H1_ENVS else "subsection"
         pattern = re.compile(
             r"\\begin\{" + env + r"\}\[([^\]]*)\]"
         )
-        body = pattern.sub(lambda m: f"\n\\subsection*{{{m.group(1)}}}\n", body)
+        body = pattern.sub(lambda m, l=level: f"\n\\{l}*{{{m.group(1)}}}\n", body)
         # Also handle without title
         body = re.sub(r"\\begin\{" + env + r"\}", "\n", body)
         body = body.replace(f"\\end{{{env}}}", "\n")
@@ -380,10 +409,54 @@ def _preprocess_latex_for_pandoc(source: str) -> str:
     # 15) \hrulefill → underscores (fill-in-the-blank lines)
     body = body.replace("\\hrulefill", "________________")
 
-    # 16) Signature: \rule → line, minipage → keep content
+    # 16) Signature: Convert side-by-side minipages into a 2-column table
+    #     Pattern: \begin{minipage}...content...\end{minipage}%\hfill%\begin{minipage}...content...\end{minipage}
+    def _minipages_to_table(body_text: str) -> str:
+        """Convert adjacent minipage pairs (joined by %\\hfill%) into a 2-column table."""
+        mp_pair = re.compile(
+            r"\\begin\{minipage\}(?:\[[^\]]*\])?\{[^}]*\}"  # \begin{minipage}[t]{0.45\textwidth}
+            r"(.*?)"                                          # content 1
+            r"\\end\{minipage\}"
+            r"\s*%\\hfill%\s*"                                # %\hfill% glue
+            r"\\begin\{minipage\}(?:\[[^\]]*\])?\{[^}]*\}"
+            r"(.*?)"                                          # content 2
+            r"\\end\{minipage\}",
+            re.DOTALL,
+        )
+        def _parse_sig_lines(content: str) -> list[str]:
+            """Extract signature lines from minipage content."""
+            content = re.sub(r"\\centering\b", "", content)
+            content = re.sub(r"\\rule\{[^}]*\}\{[^}]*\}", "________________________________", content)
+            content = re.sub(r"\\\\\s*\[\d+pt\]", "\n", content)
+            content = re.sub(r"\\\\", "\n", content)
+            lines = [l.strip() for l in content.strip().split("\n") if l.strip()]
+            return lines
+
+        def _replace_pair(m):
+            left_lines = _parse_sig_lines(m.group(1))
+            right_lines = _parse_sig_lines(m.group(2))
+            # Pad to same length
+            max_len = max(len(left_lines), len(right_lines))
+            while len(left_lines) < max_len:
+                left_lines.append("")
+            while len(right_lines) < max_len:
+                right_lines.append("")
+            # Build multi-row table — one row per line
+            rows = []
+            for l, r in zip(left_lines, right_lines):
+                rows.append(f"{l} & {r} \\\\")
+            return (
+                "\n\\begin{tabular}{p{0.45\\textwidth} p{0.45\\textwidth}}\n"
+                + "\n".join(rows) + "\n"
+                + "\\end{tabular}\n"
+            )
+
+        return mp_pair.sub(_replace_pair, body_text)
+
+    body = _minipages_to_table(body)
+
+    # Handle remaining standalone minipages (not paired)
     body = re.sub(r"\\rule\{[^}]*\}\{[^}]*\}", "________________________________", body)
-    # Handle %\hfill% between minipages (LaTeX comment glue)
-    body = re.sub(r"%\\hfill%", "\n\n", body)
     body = re.sub(r"\\begin\{minipage\}(?:\[[^\]]*\])?\{[^}]*\}", "\n", body)
     body = body.replace("\\end{minipage}", "\n")
     body = re.sub(r"\\hfill\b", "    ", body)
@@ -401,23 +474,43 @@ def _preprocess_latex_for_pandoc(source: str) -> str:
     # Remove % line comments (but not \%)
     body = re.sub(r"(?<!\\)%[^\n]*", "", body)
 
-    # 18) Clean excessive blank lines
+    # 18) Fix orphan commas at start of lines (from removed \hspace before ", date")
+    body = re.sub(r"^\s*,\s*", "", body, flags=re.MULTILINE)
+
+    # 19) Clean excessive blank lines
     body = re.sub(r"\n{4,}", "\n\n\n", body)
 
-    # 19) Build a minimal preamble that pandoc can work with
-    preamble = r"""\documentclass[12pt,a4paper]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage[brazil]{babel}
-\usepackage{booktabs}
-\usepackage{longtable}
-\usepackage{multirow}
-\usepackage{tabularx}
-\usepackage{array}
-\usepackage{enumitem}
-\usepackage{graphicx}
-\usepackage{hyperref}
-"""
+    # 20) Build a minimal preamble that pandoc can work with
+    title_block = ""
+    if doc_title or doc_student:
+        parts = []
+        if doc_title:
+            parts.append(f"\\title{{{doc_title}}}")
+        if doc_student:
+            parts.append(f"\\author{{{doc_student}}}")
+        parts.append("\\date{}")
+        title_block = "\n".join(parts) + "\n"
+
+    preamble = (
+        r"\documentclass[12pt,a4paper]{article}" + "\n"
+        r"\usepackage[utf8]{inputenc}" + "\n"
+        r"\usepackage[T1]{fontenc}" + "\n"
+        r"\usepackage[brazil]{babel}" + "\n"
+        r"\usepackage{booktabs}" + "\n"
+        r"\usepackage{longtable}" + "\n"
+        r"\usepackage{multirow}" + "\n"
+        r"\usepackage{tabularx}" + "\n"
+        r"\usepackage{array}" + "\n"
+        r"\usepackage{enumitem}" + "\n"
+        r"\usepackage{graphicx}" + "\n"
+        r"\usepackage{hyperref}" + "\n"
+        + title_block
+    )
+
+    # Inject \maketitle right after \begin{document} if we have title
+    if doc_title or doc_student:
+        body = body.replace(r"\begin{document}", r"\begin{document}" + "\n\\maketitle\n", 1)
+
     return preamble + "\n" + body
 
 
@@ -478,6 +571,12 @@ def _postprocess_docx(docx_path: str) -> None:
     for table in doc.tables:
         # Set table width to full page
         table.autofit = True
+
+        # Skip signature tables — detect by first row being all underscores/dashes
+        if table.rows:
+            first_row_text = " ".join(c.text.strip() for c in table.rows[0].cells)
+            if first_row_text and all(ch in "_ \t\n-" for ch in first_row_text):
+                continue
 
         for r_idx, row in enumerate(table.rows):
             for cell in row.cells:
