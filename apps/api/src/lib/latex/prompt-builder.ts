@@ -370,6 +370,12 @@ REGRAS CRÍTICAS:
   - NÃO use \\multirowcell — use \\multirow{N}{*}{texto}.
   - Para capas TikZ: use APENAS retângulos coloridos fixos, nodes com texto, linhas decorativas. Cores devem ser literais (aeeblue, aeegold), NUNCA calculadas.
 19. Se o documento for longo, GARANTA que todo conteúdo esteja COMPLETO. Não interrompa no meio de uma seção ou atividade. É melhor ter menos seções completas do que muitas seções incompletas.
+20. NOMEIE todos os elementos visuais com títulos descritivos numerados para facilitar referência e edição posterior:
+  - Tabelas: adicione acima da tabela um título como \\textbf{Tabela 1 --- Objetivos por área de desenvolvimento}
+  - Diagramas TikZ: adicione acima um título como \\textbf{Figura 1 --- Perfil do aluno e conexões}
+  - Caixas tcolorbox: use o argumento de título (ex: \\begin{infobox}[Quadro 1 --- Estrutura da sessão])
+  - Atividades: numere no título (ex: \\begin{atividadebox}[aeegreen]{\\starmark~Atividade 1: Nome da atividade})
+  - Use numeração sequencial consistente no documento inteiro (Tabela 1, 2, 3...; Figura 1, 2...; Quadro 1, 2...).
 
 ${AVAILABLE_LATEX_REFERENCE}
 
