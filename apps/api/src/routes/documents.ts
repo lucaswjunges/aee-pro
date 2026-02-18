@@ -15,6 +15,21 @@ import { getLatexModel, normalizeModelForProvider } from "../lib/latex/model-sel
 import { LATEX_DOCUMENT_TYPES } from "@aee-pro/shared";
 import type { Env } from "../index";
 
+/** AI generation timeout — 2 minutes */
+const AI_TIMEOUT_MS = 2 * 60 * 1000;
+/** Max age for "generating" status before marking as stale (5 minutes) */
+const STALE_GENERATING_MS = 5 * 60 * 1000;
+
+/** Wrap a promise with a timeout */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout: ${label} excedeu ${Math.round(ms / 1000)}s`)), ms),
+    ),
+  ]);
+}
+
 type DocEnv = Env & {
   Variables: {
     userId: string;
@@ -132,21 +147,25 @@ documentRoutes.post("/generate", async (c) => {
   // 6. Call AI provider
   try {
     const provider = createAIProvider(settings.aiProvider, apiKey);
-    const result = await provider.generate({
-      model,
-      messages: [
-        {
-          role: "system",
-          content: `Você é um professor especialista em Atendimento Educacional Especializado (AEE). Gere documentos profissionais, claros e funcionais em português brasileiro. A data de hoje é ${new Date().toLocaleDateString("pt-BR")}.`,
-        },
-        {
-          role: "user",
-          content: renderedPrompt,
-        },
-      ],
-      maxTokens: 2000,
-      temperature: 0.7,
-    });
+    const result = await withTimeout(
+      provider.generate({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: `Você é um professor especialista em Atendimento Educacional Especializado (AEE). Gere documentos profissionais, claros e funcionais em português brasileiro. A data de hoje é ${new Date().toLocaleDateString("pt-BR")}.`,
+          },
+          {
+            role: "user",
+            content: renderedPrompt,
+          },
+        ],
+        maxTokens: 2000,
+        temperature: 0.7,
+      }),
+      AI_TIMEOUT_MS,
+      "geração de documento",
+    );
 
     // 7. Update document with generated content
     const generatedAt = new Date().toISOString();
@@ -190,6 +209,42 @@ documentRoutes.get("/", async (c) => {
     .orderBy(desc(documents.createdAt));
 
   const result = await query;
+
+  // Auto-fix stale "generating" documents (stuck for >5 min)
+  const now = Date.now();
+  const staleIds: string[] = [];
+  for (const doc of result) {
+    if (doc.status === "generating") {
+      const updatedAt = new Date(doc.updatedAt).getTime();
+      if (now - updatedAt > STALE_GENERATING_MS) {
+        staleIds.push(doc.id);
+      }
+    }
+  }
+  if (staleIds.length > 0) {
+    for (const staleId of staleIds) {
+      await db
+        .update(documents)
+        .set({
+          status: "error",
+          content: "Erro: geração excedeu o tempo limite. Tente gerar novamente.",
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(documents.id, staleId));
+    }
+    // Re-fetch with updated statuses
+    const refreshed = await db
+      .select()
+      .from(documents)
+      .where(
+        studentId
+          ? and(eq(documents.userId, userId), eq(documents.studentId, studentId))
+          : eq(documents.userId, userId)
+      )
+      .orderBy(desc(documents.createdAt));
+    return c.json({ success: true, data: refreshed });
+  }
+
   return c.json({ success: true, data: result });
 });
 
@@ -367,18 +422,22 @@ documentRoutes.post("/:id/regenerate", async (c) => {
 
   try {
     const provider = createAIProvider(settings.aiProvider, apiKey);
-    const result = await provider.generate({
-      model,
-      messages: [
-        {
-          role: "system",
-          content: `Você é um professor especialista em Atendimento Educacional Especializado (AEE). Gere documentos profissionais, claros e funcionais em português brasileiro. A data de hoje é ${new Date().toLocaleDateString("pt-BR")}.`,
-        },
-        { role: "user", content: renderedPrompt },
-      ],
-      maxTokens: 2000,
-      temperature: 0.7,
-    });
+    const result = await withTimeout(
+      provider.generate({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: `Você é um professor especialista em Atendimento Educacional Especializado (AEE). Gere documentos profissionais, claros e funcionais em português brasileiro. A data de hoje é ${new Date().toLocaleDateString("pt-BR")}.`,
+          },
+          { role: "user", content: renderedPrompt },
+        ],
+        maxTokens: 2000,
+        temperature: 0.7,
+      }),
+      AI_TIMEOUT_MS,
+      "regeneração de documento",
+    );
 
     const generatedAt = new Date().toISOString();
     await db
@@ -445,21 +504,25 @@ documentRoutes.post("/:id/edit-ai", async (c) => {
 
   try {
     const provider = createAIProvider(settings.aiProvider, apiKey);
-    const result = await provider.generate({
-      model,
-      messages: [
-        {
-          role: "system",
-          content: "Você é um professor especialista em AEE. O usuário vai enviar uma instrução de edição e um documento entre tags XML. Aplique a instrução ao documento e retorne SOMENTE o documento editado. Não inclua as tags XML, a instrução, nem qualquer explicação na resposta — apenas o texto do documento editado.",
-        },
-        {
-          role: "user",
-          content: `<instrucao>${body.instruction}</instrucao>\n\n<documento>\n${doc.content}\n</documento>`,
-        },
-      ],
-      maxTokens: 2000,
-      temperature: 0.7,
-    });
+    const result = await withTimeout(
+      provider.generate({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "Você é um professor especialista em AEE. O usuário vai enviar uma instrução de edição e um documento entre tags XML. Aplique a instrução ao documento e retorne SOMENTE o documento editado. Não inclua as tags XML, a instrução, nem qualquer explicação na resposta — apenas o texto do documento editado.",
+          },
+          {
+            role: "user",
+            content: `<instrucao>${body.instruction}</instrucao>\n\n<documento>\n${doc.content}\n</documento>`,
+          },
+        ],
+        maxTokens: 2000,
+        temperature: 0.7,
+      }),
+      AI_TIMEOUT_MS,
+      "edição com IA",
+    );
 
     const now = new Date().toISOString();
     await db

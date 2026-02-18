@@ -53,7 +53,7 @@ export function LatexDocumentCard({
             className="flex items-start gap-3 min-w-0 flex-1"
           >
             <div className="relative shrink-0 mt-0.5">
-              <FileText className={`h-5 w-5 ${document.status === "completed" ? "text-green-600" : "text-red-600"}`} />
+              <FileText className={`h-5 w-5 ${document.status === "completed" ? "text-green-600" : isBusy ? "text-yellow-500" : "text-red-600"}`} />
               {document.status === "compile_error" && (
                 <AlertTriangle className="h-3 w-3 text-destructive absolute -bottom-1 -right-1" />
               )}

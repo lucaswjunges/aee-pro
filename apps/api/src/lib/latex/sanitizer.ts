@@ -124,14 +124,78 @@ export function sanitizeLatexSource(source: string): string {
   // which is the #1 cause of Overfull \hbox warnings.
   result = fixNarrowColumnTables(result);
 
-  // Layer 11: Add \sloppy inside tcolorbox environments.
-  // tcolorbox has narrower width than \textwidth, causing frequent
-  // Overfull \hbox. \sloppy allows more aggressive line breaking.
-  result = addSloppyToTcolorbox(result);
+  // Layer 11: Strip \sloppy from document body.
+  // \sloppy sets \emergencystretch=\maxdimen which can break tabularx's
+  // trial typesetting algorithm, causing tables to be wider than expected.
+  // Our preamble already has \tolerance=2000 and \emergencystretch=5em.
+  result = stripSloppyFromBody(result);
 
   // Layer 12: Convert l columns to p{} in tables inside tcolorbox/adjustbox
-  // when there are 3+ l columns (likely long text that will overflow).
+  // when there are 2+ l columns (likely long text that will overflow).
   result = fixTabularColumnOverflow(result);
+
+  // Layer 13: Strip \newgeometry{...} from document body.
+  // AI sometimes generates \newgeometry that resets headheight to 15pt (default),
+  // breaking fancyhdr headers. Also strip redundant \usepackage{geometry} after \begin{document}.
+  result = stripGeometryOverrides(result);
+
+  // Layer 14: Clamp tabularx width — AI generates {1.1\linewidth} or {1.2\textwidth}
+  // which guarantees overflow. Clamp any multiplier > 1 down to \linewidth.
+  result = clampTabularxWidth(result);
+
+  // Layer 15: Replace \makecell[l]{...\\...} inside p{} columns with plain text + \newline.
+  // \makecell[l] creates an internal l-column that ignores the p{} wrapping,
+  // causing Overfull \hbox. Plain text with \newline respects the column width.
+  result = replaceMakecellInParagraphColumns(result);
+
+  // Layer 16: Convert l columns to wrapping columns in tabularx that also has X columns.
+  // AI generates {lX} or {>{\bfseries}lX} — the l column never wraps, so long labels
+  // like "Diagnóstico: Transtorno do Espectro Autista (TEA) Nível 1" overflow.
+  // Convert l → p{auto-sized} by replacing l with >{\raggedright\arraybackslash}p{4cm}
+  // in tabularx that already has X columns (key-value tables).
+  result = fixLColumnInTabularxWithX(result);
+
+  // Layer 16.5: Convert fixed p{>=4cm} in tabularx with X columns to proportional widths.
+  // AI (or previous sanitizer runs) may have p{5cm} which is too wide inside tcolorbox.
+  result = convertFixedPColumnWidths(result);
+
+  // Layer 17: Clamp \rule width inside minipage/narrow containers.
+  // AI generates \rule{6cm}{0.4pt} inside 0.45\textwidth minipage = overflow.
+  result = clampRuleWidths(result);
+
+  // Layer 18: Replace large \hspace{>=4cm} with \hfill.
+  // AI generates \hspace{5cm} for spacing, which overflows on narrow containers.
+  result = clampLargeHspace(result);
+
+  // Layer 19: Ensure \noindent\begin{minipage} starts a new paragraph.
+  // Without \par before it, minipages end up inline with preceding text (e.g. date line).
+  result = ensureMinipageOnNewLine(result);
+
+  // Layer 20: Fix tabularx without X columns — convert fixed p{} widths to proportional.
+  // AI generates \begin{tabularx}{\linewidth}{p{3cm} p{4cm} p{3cm} p{3cm} p{2cm}} = 15cm
+  // but \linewidth ≈ 16cm minus padding/colsep → guaranteed overflow.
+  // Convert all p{Ncm} to p{fraction\linewidth} so total fits.
+  result = fixTabularxWithoutXColumns(result);
+
+  // Layer 21: Fix \rowcolor inside table cells — causes "Misplaced \noalign" fatal error.
+  // AI writes "Text & \rowcolor{blue} Text2 & \rowcolor{red} Text3 \\"
+  // \rowcolor uses \noalign internally and MUST be at the start of a row, before any &.
+  // Strip \rowcolor{...} that appears after & on the same line, replace with \cellcolor.
+  result = fixMisplacedRowcolor(result);
+
+  // Layer 22: Fix \objtag wrapping long text — causes Overfull because tcbox is inline and can't break.
+  // AI writes \objtag[color]{Very long objective text that overflows}
+  // Convert to plain text: just remove \objtag[color]{...} wrapper, keep content.
+  result = fixObjtagOverflow(result);
+
+  // Layer 23: Add spacing after element titles (Figura N, Tabela N, Quadro N).
+  // AI generates \textbf{Figura 1 --- ...} on a standalone line before the element,
+  // but without vertical spacing the title runs into the element below it.
+  result = addSpacingAfterElementTitles(result);
+
+  // Layer 24: Wrap bare URLs (http:// or https://) in \url{} for automatic line breaking.
+  // URLs not already inside \url{} or \href{} cause overfull because they have no breakpoints.
+  result = wrapBareUrls(result);
 
   // Layer 6: Close unclosed environments before \end{document}
   // AI output is often truncated, leaving environments open.
@@ -240,8 +304,10 @@ function wrapTikzInAdjustbox(source: string): string {
     if (depth !== 0) break;
 
     // Check if already wrapped in adjustbox (look at ~60 chars before)
+    // Must check for \begin{adjustbox} specifically — \end{adjustbox} from a previous
+    // element doesn't mean this tikzpicture is inside an adjustbox.
     const before = result.substring(Math.max(0, startIdx - 80), startIdx);
-    if (before.includes("\\begin{adjustbox}") || before.includes("adjustbox")) {
+    if (before.includes("\\begin{adjustbox}")) {
       cursor = endIdx;
       continue;
     }
@@ -513,7 +579,7 @@ function removeProblematicTikzBlocks(source: string): string {
 }
 
 /**
- * Replace X column specifiers in longtable with p{5cm}.
+ * Replace X column specifiers in longtable with p{4cm}.
  * X is a tabularx-only column type; longtable doesn't support it.
  * Handles nested braces in colspec like {p{0.2\textwidth} X}.
  */
@@ -538,7 +604,7 @@ function fixLongtableXColumns(source: string): string {
 
     // Replace standalone X (column type) but not X inside words like \textwidth
     if (/(?<![a-zA-Z\\])X(?![a-zA-Z])/.test(colspec)) {
-      const fixed = colspec.replace(/(?<![a-zA-Z\\])X(?![a-zA-Z])/g, "p{5cm}");
+      const fixed = colspec.replace(/(?<![a-zA-Z\\])X(?![a-zA-Z])/g, "p{4cm}");
       result = result.substring(0, colStart) + fixed + result.substring(i);
       searchFrom = colStart + fixed.length;
     } else {
@@ -573,7 +639,7 @@ function fixLongtableIssues(source: string): string {
     "\\end{tabular}$1\\end{adjustbox}",
   );
 
-  // Pattern 2: longtable with X column type → replace X with p{5cm}
+  // Pattern 2: longtable with X column type → replace X with p{4cm}
   // X columns are tabularx-only; longtable doesn't support them.
   // Must handle nested braces in colspec like {p{0.2\textwidth} X}
   result = fixLongtableXColumns(result);
@@ -761,12 +827,12 @@ function fixNarrowColumnTables(source: string): string {
       const lcrCount = (cleanedCols.match(/[lcr]/g) || []).length;
       const hasWideCols = /[pmbX]/.test(cleanedCols);
 
-      // Only fix tables with 3+ narrow columns and no wide columns
+      // Fix tables with 3+ narrow columns and no wide columns
       if (lcrCount < 3 || hasWideCols) continue;
 
       // Check if already inside adjustbox (look back ~100 chars)
       const before = result.substring(Math.max(0, match.index - 100), match.index);
-      if (before.includes("adjustbox")) continue;
+      if (before.includes("\\begin{adjustbox}")) continue;
 
       // Find matching \end{envName}
       const beginTag = `\\begin{${envName}}`;
@@ -815,23 +881,15 @@ function fixNarrowColumnTables(source: string): string {
  *
  * Skips boxes that already have \sloppy.
  */
-function addSloppyToTcolorbox(source: string): string {
-  // Match \begin{env}, optional [arg], and optional {mandatory arg} on same line.
-  // The {mandatory arg} is needed for atividadebox which takes [color]{title} —
-  // inserting \sloppy between them would break tcolorbox argument parsing.
-  const envPattern = new RegExp(
-    `\\\\begin\\{(${TCOLORBOX_ENVS})\\}(\\[[^\\]]*\\])?(\\{[^}\\n]*\\})?`,
-    "g",
-  );
-
-  return source.replace(envPattern, (fullMatch, _envName, _optArg, _mandArg, offset: number) => {
-    // Check if \sloppy already follows on the next line
-    const afterIdx = offset + fullMatch.length;
-    const nextChars = source.substring(afterIdx, afterIdx + 20).trimStart();
-    if (nextChars.startsWith("\\sloppy")) return fullMatch;
-
-    return fullMatch + "\n\\sloppy";
-  });
+/**
+ * Strip \sloppy from the document body.
+ * \sloppy sets \emergencystretch=\maxdimen which can interfere with
+ * tabularx's trial typesetting algorithm. Our preamble already provides
+ * \tolerance=2000 and \emergencystretch=5em for flexible line breaking.
+ */
+function stripSloppyFromBody(source: string): string {
+  // Remove standalone \sloppy lines (with optional whitespace)
+  return source.replace(/^\s*\\sloppy\s*$/gm, "");
 }
 
 /**
@@ -861,35 +919,69 @@ function fixTabularColumnOverflow(source: string): string {
 
       const envBlock = result.substring(envStart, envEnd);
 
-      // Find tabular or tabularx inside this env block
-      const tabMatch = envBlock.match(/\\begin\{tabular(?:x)?\}(?:\{[^}]*\})?\{([^}]*)\}/);
-      if (tabMatch) {
+      // Find ALL tabular/tabularx inside this env block (not just the first)
+      const tabRegex = /\\begin\{tabular(?:x)?\}(?:\{[^}]*\})?\{([^}]*)\}/g;
+      let tabMatch: RegExpExecArray | null;
+      // Collect replacements to apply in reverse order
+      const tabReplacements: { absPos: number; oldStr: string; newStr: string }[] = [];
+
+      while ((tabMatch = tabRegex.exec(envBlock)) !== null) {
         const colspec = tabMatch[1];
         // Count l columns
         const cleanedCols = colspec.replace(/>?\{[^}]*\}/g, "").replace(/[|]/g, "");
         const lCount = (cleanedCols.match(/l/g) || []).length;
         const totalCols = (cleanedCols.match(/[lcr]/g) || []).length;
 
-        // Only fix if 3+ l columns and no p{}/X columns already
+        // Fix if 3+ l columns and no p{}/X columns already
         if (lCount >= 3 && !/[pmbX]/.test(cleanedCols)) {
-          // Calculate proportional width: distribute \linewidth among columns
           const colWidth = (0.95 / totalCols).toFixed(2);
-          const newColspec = colspec.replace(
-            /(?<![a-zA-Z])l(?![a-zA-Z])/g,
-            `p{${colWidth}\\linewidth}`,
-          );
+          // Replace l columns properly — parse character by character
+          // to avoid regex lookbehind failures on adjacent column types
+          let newColspec = "";
+          let ci = 0;
+          while (ci < colspec.length) {
+            // Skip brace groups: >{...}, <{...}, @{...}, !{...}, p{...}, m{...}, b{...}
+            if (/[><@!pmb]/.test(colspec[ci]) && ci + 1 < colspec.length && colspec[ci + 1] === "{") {
+              newColspec += colspec[ci];
+              ci++;
+              // Copy brace group
+              let braceDepth = 0;
+              while (ci < colspec.length) {
+                if (colspec[ci] === "{") braceDepth++;
+                else if (colspec[ci] === "}") braceDepth--;
+                newColspec += colspec[ci];
+                ci++;
+                if (braceDepth === 0) break;
+              }
+            } else if (colspec[ci] === "l") {
+              newColspec += `p{${colWidth}\\linewidth}`;
+              ci++;
+            } else {
+              newColspec += colspec[ci];
+              ci++;
+            }
+          }
 
           const oldColspecStr = `{${colspec}}`;
           const newColspecStr = `{${newColspec}}`;
-          const relPos = envBlock.indexOf(oldColspecStr);
+          const relPos = envBlock.indexOf(oldColspecStr, tabMatch.index);
           if (relPos !== -1) {
-            const absPos = envStart + relPos;
-            result =
-              result.substring(0, absPos) +
-              newColspecStr +
-              result.substring(absPos + oldColspecStr.length);
+            tabReplacements.push({
+              absPos: envStart + relPos,
+              oldStr: oldColspecStr,
+              newStr: newColspecStr,
+            });
           }
         }
+      }
+
+      // Apply replacements in reverse order to preserve positions
+      for (let i = tabReplacements.length - 1; i >= 0; i--) {
+        const r = tabReplacements[i];
+        result =
+          result.substring(0, r.absPos) +
+          r.newStr +
+          result.substring(r.absPos + r.oldStr.length);
       }
 
       cursor = envStart + beginEnv.length;
@@ -897,6 +989,597 @@ function fixTabularColumnOverflow(source: string): string {
   }
 
   return result;
+}
+
+/**
+ * Extract the colspec from a tabularx declaration, handling nested braces.
+ * Given a string starting right after \begin{tabularx}{width}, finds the
+ * colspec group {colspec} and returns [colspec, endIndex].
+ *
+ * Example: "{>{\bfseries}lX}" → [">{\bfseries}lX", 18]
+ */
+function extractNestedBraceGroup(source: string, startIdx: number): [string, number] | null {
+  if (startIdx >= source.length || source[startIdx] !== "{") return null;
+  let depth = 1;
+  let i = startIdx + 1;
+  while (depth > 0 && i < source.length) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") depth--;
+    i++;
+  }
+  if (depth !== 0) return null;
+  return [source.substring(startIdx + 1, i - 1), i];
+}
+
+/**
+ * Parse a LaTeX colspec and replace bare l columns with p{4cm}.
+ * Handles modifiers like >{\bfseries}, separators |, @{}, etc.
+ *
+ * Colspec tokens: l, c, r, X, p{..}, m{..}, b{..}, |, @{..}, >{..}, <{..}, !{..}
+ *
+ * Only replaces l columns, preserving any >{\modifier} prefix.
+ */
+function replaceColumnsInColspec(colspec: string): string {
+  let result = "";
+  let i = 0;
+  let pendingModifier = ""; // accumulated >{\something} before a column type
+
+  while (i < colspec.length) {
+    const ch = colspec[i];
+
+    if (ch === "|") {
+      result += ch;
+      i++;
+    } else if (ch === ">" || ch === "<" || ch === "!" || ch === "@") {
+      // These are followed by {content} — consume the brace group
+      const braceStart = colspec.indexOf("{", i + 1);
+      if (braceStart === -1) { result += ch; i++; continue; }
+      let depth = 1;
+      let j = braceStart + 1;
+      while (depth > 0 && j < colspec.length) {
+        if (colspec[j] === "{") depth++;
+        else if (colspec[j] === "}") depth--;
+        j++;
+      }
+      const group = colspec.substring(i, j);
+      if (ch === ">") {
+        pendingModifier += group;
+      } else {
+        result += group;
+      }
+      i = j;
+    } else if (ch === "l") {
+      // This is the column we want to replace
+      const hasRaggedright = /raggedright/.test(pendingModifier);
+      const hasArraybackslash = /arraybackslash/.test(pendingModifier);
+      if (pendingModifier) {
+        // Insert raggedright+arraybackslash into existing modifier
+        let mod = pendingModifier.slice(0, -1); // remove last }
+        if (!hasRaggedright) mod += "\\raggedright";
+        if (!hasArraybackslash) mod += "\\arraybackslash";
+        mod += "}";
+        result += mod + "p{4cm}";
+      } else {
+        result += ">{\\raggedright\\arraybackslash}p{4cm}";
+      }
+      pendingModifier = "";
+      i++;
+    } else if (ch === "c" || ch === "r" || ch === "X") {
+      result += pendingModifier + ch;
+      pendingModifier = "";
+      i++;
+    } else if (ch === "p" || ch === "m" || ch === "b") {
+      // These are followed by {width} — consume
+      const braceStart = colspec.indexOf("{", i + 1);
+      if (braceStart === -1) { result += pendingModifier + ch; pendingModifier = ""; i++; continue; }
+      let depth = 1;
+      let j = braceStart + 1;
+      while (depth > 0 && j < colspec.length) {
+        if (colspec[j] === "{") depth++;
+        else if (colspec[j] === "}") depth--;
+        j++;
+      }
+      result += pendingModifier + colspec.substring(i, j);
+      pendingModifier = "";
+      i = j;
+    } else if (/\s/.test(ch)) {
+      result += ch;
+      i++;
+    } else {
+      result += pendingModifier + ch;
+      pendingModifier = "";
+      i++;
+    }
+  }
+
+  // Flush any remaining modifier
+  result += pendingModifier;
+
+  return result;
+}
+
+/**
+ * Convert l columns to wrapping columns in tabularx that has X columns.
+ *
+ * AI generates {lX}, {>{\bfseries}lX}, {>{\bfseries}lXX} for key-value tables.
+ * The l column never wraps, so long label text overflows.
+ * Convert bare l (and l with modifiers like >{\bfseries}) to a wrapping p{} column.
+ *
+ * Only targets tabularx with at least one X column — these are key-value tables
+ * where the l column is for labels and should wrap if too long.
+ */
+function fixLColumnInTabularxWithX(source: string): string {
+  const marker = "\\begin{tabularx}";
+  let result = source;
+  let cursor = 0;
+  let safety = 0;
+
+  while (safety++ < 50) {
+    const idx = result.indexOf(marker, cursor);
+    if (idx === -1) break;
+
+    const afterMarker = idx + marker.length;
+
+    // Skip the width group {width}
+    const widthGroup = extractNestedBraceGroup(result, afterMarker);
+    if (!widthGroup) { cursor = afterMarker; continue; }
+    const [, afterWidth] = widthGroup;
+
+    // Skip optional whitespace
+    let colspecStart = afterWidth;
+    while (colspecStart < result.length && /\s/.test(result[colspecStart])) colspecStart++;
+
+    // Extract the colspec group {colspec}
+    const colspecGroup = extractNestedBraceGroup(result, colspecStart);
+    if (!colspecGroup) { cursor = afterWidth; continue; }
+    const [colspec, afterColspec] = colspecGroup;
+
+    // Strip brace groups from colspec to get bare column types for detection.
+    // e.g. ">{\bfseries}lX" → "lX", ">{\raggedright\arraybackslash}p{4cm}X" → "pX"
+    const bareTypes = colspec.replace(/[><!@]\{[^}]*\}/g, "").replace(/\{[^}]*\}/g, "").replace(/[|\s]/g, "");
+
+    // Only fix if there's at least one X column AND at least one l column
+    if (!bareTypes.includes("X") || !bareTypes.includes("l")) {
+      cursor = afterColspec;
+      continue;
+    }
+
+    // Parse the colspec and replace l columns with p{4cm}
+    const newColspec = replaceColumnsInColspec(colspec);
+
+    if (newColspec !== colspec) {
+      // Replace in source
+      const before = result.substring(0, colspecStart);
+      const after = result.substring(afterColspec);
+      result = before + "{" + newColspec + "}" + after;
+      cursor = before.length + newColspec.length + 2;
+    } else {
+      cursor = afterColspec;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Clamp fixed p{Ncm} column widths to p{4cm} in tabularx that also has X columns.
+ * AI sometimes generates p{5cm} or wider, which leaves too little room for X columns.
+ *
+ * Uses extractNestedBraceGroup for proper brace matching since colspecs
+ * contain nested braces like >{\bfseries}p{5cm}X.
+ */
+function convertFixedPColumnWidths(source: string): string {
+  let result = source;
+  const tabularxTag = "\\begin{tabularx}";
+  let cursor = 0;
+
+  while (cursor < result.length) {
+    const pos = result.indexOf(tabularxTag, cursor);
+    if (pos === -1) break;
+
+    // Skip past \begin{tabularx}
+    const afterTag = pos + tabularxTag.length;
+
+    // Extract width group {width}
+    const widthGroup = extractNestedBraceGroup(result, afterTag);
+    if (!widthGroup) { cursor = afterTag; continue; }
+    const [, afterWidth] = widthGroup;
+
+    // Skip whitespace
+    let colspecStart = afterWidth;
+    while (colspecStart < result.length && /\s/.test(result[colspecStart])) colspecStart++;
+
+    // Extract colspec group {colspec}
+    const colspecGroup = extractNestedBraceGroup(result, colspecStart);
+    if (!colspecGroup) { cursor = afterWidth; continue; }
+    const [colspec, afterColspec] = colspecGroup;
+
+    // Check if there's an X column
+    const bareTypes = colspec.replace(/[><!@]\{[^}]*\}/g, "").replace(/\{[^}]*\}/g, "").replace(/[|\s]/g, "");
+    if (!bareTypes.includes("X")) { cursor = afterColspec; continue; }
+
+    // Clamp p{Ncm} where N > 4 to p{4cm}
+    const newColspec = colspec.replace(
+      /p\{(\d+\.?\d*)\s*cm\}/g,
+      (_m, width: string) => {
+        if (parseFloat(width) > 4) {
+          return "p{4cm}";
+        }
+        return _m;
+      },
+    );
+
+    if (newColspec !== colspec) {
+      const before = result.substring(0, colspecStart);
+      const after = result.substring(afterColspec);
+      result = before + "{" + newColspec + "}" + after;
+      cursor = before.length + newColspec.length + 2;
+    } else {
+      cursor = afterColspec;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Clamp \rule{width}{height} when the width is >= 5cm and it's inside a minipage
+ * or narrow container. Replace fixed widths with \linewidth.
+ *
+ * AI generates \rule{6cm}{0.4pt} inside 0.45\textwidth minipage, causing overflow.
+ */
+function clampRuleWidths(source: string): string {
+  // Find \rule{Ncm} where N >= 5 inside minipage and replace with \linewidth
+  let result = source;
+
+  // Strategy: find minipage blocks, and inside them clamp large \rule widths
+  const minipageRegex = /\\begin\{minipage\}(?:\[[^\]]*\])?\{[^}]*\}/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = minipageRegex.exec(result)) !== null) {
+    const mpStart = match.index;
+    const endTag = "\\end{minipage}";
+    const mpEnd = result.indexOf(endTag, mpStart);
+    if (mpEnd === -1) continue;
+
+    const blockEnd = mpEnd + endTag.length;
+    const block = result.substring(mpStart, blockEnd);
+
+    // Replace \rule{Ncm}{...} where N >= 5 with \rule{\linewidth}{...}
+    const fixed = block.replace(
+      /\\rule\{(\d+\.?\d*)\s*cm\}/g,
+      (_m, width: string) => {
+        if (parseFloat(width) >= 5) {
+          return "\\rule{\\linewidth}";
+        }
+        return _m;
+      },
+    );
+
+    if (fixed !== block) {
+      result = result.substring(0, mpStart) + fixed + result.substring(blockEnd);
+      // Adjust regex index for next iteration
+      minipageRegex.lastIndex = mpStart + fixed.length;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Replace large \hspace{>=4cm} with \hfill.
+ * AI generates \hspace{5cm} for visual spacing (e.g. before dates),
+ * but on narrow containers or short lines this overflows.
+ */
+function clampLargeHspace(source: string): string {
+  return source.replace(
+    /\\hspace\{(\d+\.?\d*)\s*cm\}/g,
+    (_m, width: string) => {
+      if (parseFloat(width) >= 4) {
+        return "\\hfill";
+      }
+      return _m;
+    },
+  );
+}
+
+/**
+ * Layer 19: Ensure \begin{minipage} on a new line starts a new paragraph.
+ *
+ * When \begin{minipage} appears right after a text line without an explicit
+ * paragraph break (\par or blank line), LaTeX treats it as inline content,
+ * causing signatures to appear next to dates, etc.
+ *
+ * This inserts \par before \begin{minipage} lines that don't already have
+ * a paragraph break above them.
+ */
+function ensureMinipageOnNewLine(source: string): string {
+  const lines = source.split("\n");
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    if (
+      (trimmed.startsWith("\\begin{minipage}") ||
+        trimmed.startsWith("\\noindent\\begin{minipage}") ||
+        trimmed.startsWith("\\noindent \\begin{minipage}")) &&
+      i > 0
+    ) {
+      const prev = lines[i - 1].trim();
+      // If previous line is not empty, not \par, not \end{...}, not \vspace, not \\,
+      // not \hfill (glue between paired minipages), not ending with % (continuation)
+      // then we need a paragraph break
+      if (
+        prev !== "" &&
+        !prev.endsWith("\\par") &&
+        !prev.startsWith("\\end{") &&
+        !prev.startsWith("\\vspace") &&
+        !prev.startsWith("\\par") &&
+        !prev.startsWith("\\hfill") &&
+        !prev.endsWith("%") &&
+        prev !== "\\\\"
+      ) {
+        result.push("\\par");
+      }
+    }
+    result.push(lines[i]);
+  }
+
+  return result.join("\n");
+}
+
+/**
+ * Layer 20: Fix tabularx without X columns.
+ *
+ * AI generates \begin{tabularx}{\linewidth}{p{3cm} p{4cm} p{3cm} p{3cm} p{2cm}}
+ * Total = 15cm fixed, but \linewidth is only ~16cm minus column separators and padding.
+ * Without any X column, tabularx can't flex — it behaves like a rigid tabular.
+ *
+ * Solution: Convert all p{Ncm} to proportional p{frac\linewidth} so total ≤ 0.95\linewidth.
+ * We reserve 5% for column separators (6 \tabcolsep × 2 per col gap).
+ */
+function fixTabularxWithoutXColumns(source: string): string {
+  let result = source;
+  const tabularxTag = "\\begin{tabularx}";
+  let cursor = 0;
+
+  while (cursor < result.length) {
+    const pos = result.indexOf(tabularxTag, cursor);
+    if (pos === -1) break;
+
+    const afterTag = pos + tabularxTag.length;
+
+    // Extract width group {width}
+    const widthGroup = extractNestedBraceGroup(result, afterTag);
+    if (!widthGroup) { cursor = afterTag; continue; }
+    const [, afterWidth] = widthGroup;
+
+    // Skip whitespace
+    let colspecStart = afterWidth;
+    while (colspecStart < result.length && /\s/.test(result[colspecStart])) colspecStart++;
+
+    // Extract colspec group {colspec}
+    const colspecGroup = extractNestedBraceGroup(result, colspecStart);
+    if (!colspecGroup) { cursor = afterWidth; continue; }
+    const [colspec, afterColspec] = colspecGroup;
+
+    // Strip modifiers to find bare column types
+    const bareTypes = colspec
+      .replace(/[><!@]\{[^}]*\}/g, "")
+      .replace(/\{[^}]*\}/g, "")
+      .replace(/[|\s]/g, "");
+
+    // Only act on tabularx WITHOUT X columns that have p{} columns
+    if (bareTypes.includes("X") || !bareTypes.includes("p")) {
+      cursor = afterColspec;
+      continue;
+    }
+
+    // Extract all p{Ncm} widths
+    const pWidths: { match: string; cm: number }[] = [];
+    const pRegex = /p\{(\d+\.?\d*)\s*cm\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = pRegex.exec(colspec)) !== null) {
+      pWidths.push({ match: m[0], cm: parseFloat(m[1]) });
+    }
+
+    if (pWidths.length === 0) {
+      cursor = afterColspec;
+      continue;
+    }
+
+    const totalCm = pWidths.reduce((sum, pw) => sum + pw.cm, 0);
+
+    // Only fix if total exceeds ~14cm (typical \linewidth for a4paper with 2.5cm margins ≈ 16cm)
+    if (totalCm <= 14) {
+      cursor = afterColspec;
+      continue;
+    }
+
+    // Convert each p{Ncm} to proportional, using 0.95 as usable fraction
+    const usableFraction = 0.95;
+    let newColspec = colspec;
+    for (const pw of pWidths) {
+      const fraction = ((pw.cm / totalCm) * usableFraction).toFixed(2);
+      newColspec = newColspec.replace(
+        pw.match,
+        `p{${fraction}\\linewidth}`,
+      );
+    }
+
+    if (newColspec !== colspec) {
+      const before = result.substring(0, colspecStart);
+      const after = result.substring(afterColspec);
+      result = before + "{" + newColspec + "}" + after;
+      cursor = before.length + newColspec.length + 2;
+    } else {
+      cursor = afterColspec;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Layer 21: Fix \rowcolor placed inside table cells (after &).
+ *
+ * \rowcolor uses \noalign internally and MUST appear at the very start of a row,
+ * before any &. When AI writes:
+ *   Text & \rowcolor{green} Text2 & \rowcolor{red} Text3 \\
+ * it causes "Misplaced \noalign" fatal error.
+ *
+ * Fix: convert \rowcolor{...} that appears after & to \cellcolor{...},
+ * which is the per-cell equivalent and doesn't use \noalign.
+ */
+function fixMisplacedRowcolor(source: string): string {
+  const lines = source.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Only process lines that have both & and \rowcolor
+    if (!line.includes("&") || !line.includes("\\rowcolor")) continue;
+
+    // Split by & to find cells
+    const cells = line.split("&");
+    let changed = false;
+
+    for (let c = 1; c < cells.length; c++) {
+      // In cells after the first one, \rowcolor is misplaced
+      if (cells[c].includes("\\rowcolor")) {
+        cells[c] = cells[c].replace(/\\rowcolor/g, "\\cellcolor");
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      lines[i] = cells.join("&");
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Layer 22: Fix \objtag wrapping long text.
+ *
+ * \objtag is a \newtcbox (inline box) that can't break across lines.
+ * When AI puts a full sentence inside \objtag[color]{long text...},
+ * the inline box overflows. Solution: unwrap the text, keeping just the content.
+ *
+ * Threshold: if the text inside \objtag{} is longer than 40 chars, unwrap it.
+ */
+function fixObjtagOverflow(source: string): string {
+  return source.replace(
+    /\\objtag\[([^\]]*)\]\{([^}]+)\}/g,
+    (_match, _color: string, text: string) => {
+      if (text.length > 40) {
+        return text;
+      }
+      return _match;
+    },
+  );
+}
+
+/**
+ * Clamp tabularx width to at most \linewidth.
+ *
+ * AI sometimes generates \begin{tabularx}{1.1\linewidth} or {1.2\textwidth}
+ * which is wider than the page and guarantees Overfull \hbox.
+ * Any multiplier > 1.0 is clamped to plain \linewidth.
+ */
+function clampTabularxWidth(source: string): string {
+  // Match \begin{tabularx}{<width>} where width may be a multiplier > 1
+  return source.replace(
+    /\\begin\{tabularx\}\{(\d+\.?\d*)\s*\\(linewidth|textwidth)\}/g,
+    (_match, multiplier, unit) => {
+      const val = parseFloat(multiplier);
+      if (val > 1.0) {
+        return "\\begin{tabularx}{\\linewidth}";
+      }
+      return `\\begin{tabularx}{${multiplier}\\${unit}}`;
+    },
+  );
+}
+
+/**
+ * Replace \makecell[l]{text1 \\ text2 \\ text3} with plain text using \newline.
+ *
+ * \makecell[l] creates an internal l-alignment column which IGNORES the
+ * enclosing p{} column width, causing Overfull \hbox for long text.
+ * Replacing with direct text + \newline respects the p{} wrapping.
+ *
+ * Only targets \makecell[l] (left-aligned) which is the most common AI pattern.
+ * \makecell[c] or bare \makecell are less problematic (shorter text typically).
+ */
+function replaceMakecellInParagraphColumns(source: string): string {
+  let result = source;
+  // Match \makecell[l]{ ... }
+  // Need to handle nested braces inside the content
+  const pattern = /\\makecell\[l\]\s*\{/g;
+  let match: RegExpExecArray | null;
+  let safety = 0;
+
+  while (safety++ < 200) {
+    pattern.lastIndex = 0;
+    match = pattern.exec(result);
+    if (!match) break;
+
+    const fullMatchStart = match.index;
+    const braceStart = fullMatchStart + match[0].length - 1;
+
+    // Find matching closing }
+    let depth = 1;
+    let idx = braceStart + 1;
+    while (depth > 0 && idx < result.length) {
+      if (result[idx] === "{") depth++;
+      else if (result[idx] === "}") depth--;
+      idx++;
+    }
+    if (depth !== 0) break;
+
+    const content = result.substring(braceStart + 1, idx - 1);
+
+    // Replace \\ line breaks with \newline (since we're in paragraph mode)
+    // Handle \\[Xpt] spacing variants too
+    const fixed = content
+      .replace(/\\\\\s*\[\s*[^[\]]*\]/g, "\\newline ")
+      .replace(/\\\\/g, "\\newline ");
+
+    result = result.substring(0, fullMatchStart) + fixed + result.substring(idx);
+  }
+
+  return result;
+}
+
+/**
+ * Strip \newgeometry{...} and redundant \usepackage{geometry} from the document body.
+ *
+ * AI-generated LaTeX sometimes includes \newgeometry{...} calls that reset
+ * headheight to the default 15pt, causing fancyhdr warnings. The preamble
+ * already has the correct geometry settings including headheight=28pt.
+ *
+ * Also removes \geometry{...} and \restoregeometry commands.
+ */
+function stripGeometryOverrides(source: string): string {
+  const beginDoc = source.indexOf("\\begin{document}");
+  if (beginDoc === -1) return source;
+
+  const preamble = source.substring(0, beginDoc);
+  let body = source.substring(beginDoc);
+
+  // Remove \newgeometry{...} (may span multiple lines)
+  body = body.replace(/\\newgeometry\s*\{[^}]*\}/g, "");
+
+  // Remove \restoregeometry
+  body = body.replace(/\\restoregeometry\b/g, "");
+
+  // Remove \geometry{...} calls in the body
+  body = body.replace(/\\geometry\s*\{[^}]*\}/g, "");
+
+  // Remove redundant \usepackage[...]{geometry} in the body (shouldn't be there)
+  body = body.replace(/\\usepackage\s*(\[[^\]]*\])?\s*\{geometry\}/g, "");
+
+  return preamble + body;
 }
 
 function stripTexConditionalMarkers(source: string): string {
@@ -940,4 +1623,42 @@ function stripTexConditionalMarkers(source: string): string {
   result = result.replace(/\n{3,}/g, "\n\n");
 
   return result;
+}
+
+/**
+ * Add vertical spacing around element titles like:
+ *   \textbf{Figura 1 --- Linha do tempo...}
+ *   \textbf{Tabela 2 --- Objetivos por área}
+ *   \textbf{Quadro 3 --- Estrutura da sessão}
+ *
+ * Professional LaTeX documents use \caption which gives ~10pt above + below.
+ * We replicate that with \vspace{0.6cm} above and \vspace{0.4cm} below,
+ * centering the title and using \small + italic for a caption-like style.
+ */
+function addSpacingAfterElementTitles(source: string): string {
+  return source.replace(
+    /^([ \t]*)(\\textbf\{((?:Figura|Tabela|Quadro)\s+\d+\s*---[^}]*)\})\s*$/gm,
+    "$1\\vspace{0.6cm}\n$1\\begin{center}\n$1\\small\\textbf{$3}\\end{center}\n$1\\vspace{0.4cm}",
+  );
+}
+
+/**
+ * Layer 24: Wrap bare URLs in \url{} for automatic line breaking.
+ *
+ * AI-generated LaTeX often includes bare URLs like:
+ *   Acesse https://example.com/very/long/path para mais informações.
+ *
+ * Without \url{}, LaTeX treats the URL as a single unbreakable word,
+ * causing severe Overfull \hbox. The url/xurl packages (loaded in preamble)
+ * allow breaking at /, -, ., and alphanumeric boundaries.
+ *
+ * Skips URLs already inside \url{}, \href{}, or verbatim environments.
+ */
+function wrapBareUrls(source: string): string {
+  // Match http:// or https:// URLs NOT preceded by \url{ or \href{
+  // URL characters: letters, digits, and common URL punctuation
+  return source.replace(
+    /(?<!\\url\{)(?<!\\href\{)(https?:\/\/[^\s},)\]\\]+)/g,
+    "\\url{$1}",
+  );
 }

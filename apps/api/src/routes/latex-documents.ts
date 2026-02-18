@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { eq, and, desc } from "drizzle-orm";
-import { latexDocuments, students, userSettings } from "@aee-pro/db/schema";
+import { latexDocuments, students, userSettings, userImages } from "@aee-pro/db/schema";
 import { createDb } from "../db/index";
 import { authMiddleware } from "../middleware/auth";
 import { decrypt } from "../lib/encryption";
@@ -9,11 +9,15 @@ import { getLatexPreamble } from "../lib/latex/preamble";
 import { buildLatexPrompt, buildSignatureBlock } from "../lib/latex/prompt-builder";
 import { getLatexModel, normalizeModelForProvider } from "../lib/latex/model-selection";
 import { getDocumentTypeConfig } from "../lib/latex/document-types";
-import { compileLatex } from "../lib/latex/compiler-client";
-import { compileWithAutoFix } from "../lib/latex/auto-fix";
+import { compileLatex, generateAndCompile, type CompileImage } from "../lib/latex/compiler-client";
+import { compileWithAutoFix, filterDisplayWarnings } from "../lib/latex/auto-fix";
 import { sanitizeLatexSource } from "../lib/latex/sanitizer";
+import { resolveImagesFromLatex } from "../lib/latex/image-resolver";
 import { LATEX_DOCUMENT_TYPES, SIZE_LEVELS } from "@aee-pro/shared";
 import type { Env } from "../index";
+
+/** Max age for "generating"/"compiling" status before marking as stale (5 minutes) */
+const STALE_GENERATING_MS = 5 * 60 * 1000;
 
 type LatexEnv = Env & {
   Variables: {
@@ -207,56 +211,129 @@ latexDocumentRoutes.post("/generate", async (c) => {
 
   const bgWork = (async () => {
     try {
-      const provider = createAIProvider(aiProvider, apiKey);
-      const result = await provider.generate({
-        model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        maxTokens: effectiveMaxTokens,
-        temperature: 0.7,
-      });
-
-      let body_latex = extractLatexBody(result.content);
-
-      // Quality check: reject near-empty content
-      const qualityError = checkContentQuality(body_latex);
-      if (qualityError) {
-        await db
-          .update(latexDocuments)
-          .set({ status: "error", lastCompilationError: qualityError, updatedAt: new Date().toISOString() })
-          .where(eq(latexDocuments.id, docId));
-        return;
-      }
-
-      // Inject professional signature block before \end{document}
-      body_latex = injectSignatureBlock(body_latex, body.documentType, student);
-
       const preamble = getLatexPreamble({
         documentTitle: typeName,
         studentName: student.name,
         schoolName: student.school ?? "Escola",
       });
-      const fullLatex = preamble + body_latex;
+      const signatureBlock = buildSignatureBlock(body.documentType, student);
 
-      await db
-        .update(latexDocuments)
-        .set({
-          latexSource: fullLatex,
-          status: "compiling",
-          generatedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(latexDocuments.id, docId));
+      // --- Try local server (Claude API + pdflatex) first ---
+      const localResult = await generateAndCompile(
+        {
+          systemPrompt: system,
+          userPrompt: user,
+          preamble,
+          maxTokens: effectiveMaxTokens,
+          signatureBlock,
+        },
+        c.env.LATEX_COMPILER_URL,
+        c.env.LATEX_COMPILER_TOKEN,
+      );
 
+      if (localResult?.success && localResult.pdfBase64 && localResult.latexSource) {
+        console.log(`[generate] Local server succeeded (model: ${localResult.aiModel}, attempts: ${localResult.attempts})`);
+        const r2Key = `latex-pdfs/${userId}/${docId}.pdf`;
+        const pdfBuffer = Uint8Array.from(atob(localResult.pdfBase64), (ch) => ch.charCodeAt(0));
+        await c.env.R2.put(r2Key, pdfBuffer, {
+          httpMetadata: { contentType: "application/pdf" },
+        });
+
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: localResult.latexSource,
+            pdfR2Key: r2Key,
+            pdfSizeBytes: localResult.pdfSizeBytes ?? pdfBuffer.length,
+            status: "completed",
+            compilationAttempts: localResult.attempts,
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(localResult.warnings ?? [])),
+            lastCompilationError: null,
+            aiModel: localResult.aiModel ?? model,
+            generatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, docId));
+        return;
+      }
+
+      // If local server generated LaTeX but compilation failed, use that LaTeX
+      // and try compiling via the standard auto-fix pipeline
+      let fullLatex: string | null = null;
+
+      if (localResult && !localResult.success && localResult.latexSource) {
+        console.log(`[generate] Local Claude generated LaTeX but compilation failed: ${localResult.error?.slice(0, 100)}, trying auto-fix pipeline...`);
+        fullLatex = localResult.latexSource;
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: fullLatex,
+            status: "compiling",
+            aiModel: localResult.aiModel ?? model,
+            generatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, docId));
+      } else {
+        if (localResult) {
+          console.log(`[generate] Local server returned error: ${localResult.error}, falling back to Worker AI`);
+        } else {
+          console.log("[generate] Local server unavailable, falling back to Worker AI");
+        }
+
+        // --- Fallback: generate with Worker AI provider ---
+        const provider = createAIProvider(aiProvider, apiKey);
+        const result = await provider.generate({
+          model,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          maxTokens: effectiveMaxTokens,
+          temperature: 0.7,
+        });
+
+        let body_latex = extractLatexBody(result.content);
+
+        // Quality check: reject near-empty content
+        const qualityError = checkContentQuality(body_latex);
+        if (qualityError) {
+          await db
+            .update(latexDocuments)
+            .set({ status: "error", lastCompilationError: qualityError, updatedAt: new Date().toISOString() })
+            .where(eq(latexDocuments.id, docId));
+          return;
+        }
+
+        // Inject professional signature block before \end{document}
+        body_latex = injectSignatureBlock(body_latex, body.documentType, student);
+
+        fullLatex = preamble + body_latex;
+
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: fullLatex,
+            status: "compiling",
+            generatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, docId));
+      }
+
+      // Resolve images referenced in the LaTeX source
+      const images = await resolveImagesFromLatex(fullLatex!, userId, db, c.env.R2);
+
+      // Create AI provider for auto-fix pipeline
+      const provider = createAIProvider(aiProvider, apiKey);
       const compileResult = await compileWithAutoFix(
-        fullLatex,
+        fullLatex!,
         c.env.LATEX_COMPILER_URL,
         c.env.LATEX_COMPILER_TOKEN,
         provider,
         model,
         effectiveMaxTokens,
+        images.length > 0 ? images : undefined,
       );
 
       if (compileResult.success && compileResult.pdfBase64) {
@@ -274,7 +351,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
             pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
             status: "completed",
             compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
             lastCompilationError: null,
             updatedAt: new Date().toISOString(),
           })
@@ -286,7 +363,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
             latexSource: compileResult.latexSource,
             status: "compile_error",
             compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
             lastCompilationError: compileResult.lastError ?? "Unknown compilation error",
             updatedAt: new Date().toISOString(),
           })
@@ -340,6 +417,60 @@ latexDocumentRoutes.get("/", async (c) => {
         : eq(latexDocuments.userId, userId),
     )
     .orderBy(desc(latexDocuments.createdAt));
+
+  // Auto-fix stale "generating"/"compiling" documents (stuck for >5 min)
+  const now = Date.now();
+  const staleIds: string[] = [];
+  for (const doc of result) {
+    if (doc.status === "generating" || doc.status === "compiling") {
+      const updatedAt = new Date(doc.updatedAt).getTime();
+      if (now - updatedAt > STALE_GENERATING_MS) {
+        staleIds.push(doc.id);
+      }
+    }
+  }
+  if (staleIds.length > 0) {
+    for (const staleId of staleIds) {
+      await db
+        .update(latexDocuments)
+        .set({
+          status: "error",
+          lastCompilationError: "Timeout: geração excedeu o tempo limite. Tente gerar novamente.",
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(latexDocuments.id, staleId));
+    }
+    // Re-fetch with updated statuses
+    const refreshed = await db
+      .select({
+        id: latexDocuments.id,
+        userId: latexDocuments.userId,
+        studentId: latexDocuments.studentId,
+        documentType: latexDocuments.documentType,
+        title: latexDocuments.title,
+        pdfR2Key: latexDocuments.pdfR2Key,
+        pdfSizeBytes: latexDocuments.pdfSizeBytes,
+        status: latexDocuments.status,
+        heatLevel: latexDocuments.heatLevel,
+        sizeLevel: latexDocuments.sizeLevel,
+        aiProvider: latexDocuments.aiProvider,
+        aiModel: latexDocuments.aiModel,
+        compilationAttempts: latexDocuments.compilationAttempts,
+        lastCompilationError: latexDocuments.lastCompilationError,
+        compilationWarnings: latexDocuments.compilationWarnings,
+        generatedAt: latexDocuments.generatedAt,
+        createdAt: latexDocuments.createdAt,
+        updatedAt: latexDocuments.updatedAt,
+      })
+      .from(latexDocuments)
+      .where(
+        studentId
+          ? and(eq(latexDocuments.userId, userId), eq(latexDocuments.studentId, studentId))
+          : eq(latexDocuments.userId, userId),
+      )
+      .orderBy(desc(latexDocuments.createdAt));
+    return c.json({ success: true, data: refreshed });
+  }
 
   return c.json({ success: true, data: result });
 });
@@ -431,6 +562,9 @@ latexDocumentRoutes.get("/:id/export/docx", async (c) => {
     return c.json({ success: false, error: "Compilador LaTeX não configurado" }, 500);
   }
 
+  // Resolve images for DOCX conversion
+  const docxImages = await resolveImagesFromLatex(doc.latexSource, userId, createDb(c.env.DB), c.env.R2);
+
   let res: Response;
   try {
     res = await fetch(`${compilerUrl}/convert-docx`, {
@@ -439,7 +573,10 @@ latexDocumentRoutes.get("/:id/export/docx", async (c) => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${compilerToken}`,
       },
-      body: JSON.stringify({ latex_source: doc.latexSource }),
+      body: JSON.stringify({
+        latex_source: doc.latexSource,
+        ...(docxImages.length > 0 ? { images: docxImages } : {}),
+      }),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -516,6 +653,10 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
 
   const bgWork = (async () => {
     try {
+      // Resolve images referenced in the LaTeX source
+      const images = await resolveImagesFromLatex(latexSource, userId, db, c.env.R2);
+      const imagesParam = images.length > 0 ? images : undefined;
+
       let compileResult;
 
       if (settings?.aiProvider && settings?.aiApiKeyEncrypted) {
@@ -536,6 +677,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
             provider,
             model,
             getMaxTokens(doc.sizeLevel),
+            imagesParam,
           );
         }
       }
@@ -543,7 +685,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
       // Fallback: compile without auto-fix (still sanitize)
       if (!compileResult) {
         const sanitized = sanitizeLatexSource(latexSource);
-        const raw = await compileLatex(sanitized, c.env.LATEX_COMPILER_URL, c.env.LATEX_COMPILER_TOKEN);
+        const raw = await compileLatex(sanitized, c.env.LATEX_COMPILER_URL, c.env.LATEX_COMPILER_TOKEN, imagesParam);
         compileResult = { ...raw, latexSource: sanitized, attempts: 1 };
       }
 
@@ -562,7 +704,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
             pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
             status: "completed",
             compilationAttempts: (doc.compilationAttempts ?? 0) + compileResult.attempts,
-            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
             lastCompilationError: null,
             updatedAt: new Date().toISOString(),
           })
@@ -573,7 +715,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
           .set({
             status: "compile_error",
             compilationAttempts: (doc.compilationAttempts ?? 0) + compileResult.attempts,
-            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
             lastCompilationError: compileResult.lastError ?? "Unknown error",
             updatedAt: new Date().toISOString(),
           })
@@ -654,13 +796,42 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
   const bgWork = (async () => {
     try {
       const provider = createAIProvider(editAiProvider, apiKey);
+
+      // Fetch user's available images to inform the AI
+      const allUserImages = await db
+        .select()
+        .from(userImages)
+        .where(eq(userImages.userId, userId));
+
+      // Build available images section for the system prompt
+      let imagePromptSection = "";
+      const availableImages = [
+        ...allUserImages.map((img) => ({ filename: img.filename, displayName: img.displayName })),
+        { filename: "urso-pelucia.png", displayName: "Urso de Pelúcia" },
+        { filename: "estrela-dourada.png", displayName: "Estrela Dourada" },
+        { filename: "coracao-vermelho.png", displayName: "Coração Vermelho" },
+        { filename: "borboleta-colorida.png", displayName: "Borboleta Colorida" },
+        { filename: "coruja-sabedoria.png", displayName: "Coruja da Sabedoria" },
+        { filename: "livro-aberto.png", displayName: "Livro Aberto" },
+        { filename: "lapis-colorido.png", displayName: "Lápis Colorido" },
+        { filename: "nuvem-fofa.png", displayName: "Nuvem Fofa" },
+        { filename: "arco-iris.png", displayName: "Arco-Íris" },
+        { filename: "flor-jardim.png", displayName: "Flor do Jardim" },
+        { filename: "sol-sorridente.png", displayName: "Sol Sorridente" },
+        { filename: "abc-letras.png", displayName: "Letras ABC" },
+      ];
+
+      if (availableImages.length > 0) {
+        imagePromptSection = `\n\nIMAGENS DISPONÍVEIS (use \\includegraphics{filename} para incluir):\n${availableImages.map((img) => `- ${img.filename} — ${img.displayName}`).join("\n")}\nPara incluir uma imagem: \\includegraphics[width=3cm]{filename}\nVocê pode ajustar width conforme necessário. Use \\begin{center}...\\end{center} para centralizar.`;
+      }
+
       const result = await provider.generate({
         model,
         messages: [
           {
             role: "system",
             content:
-              "Você é um especialista em LaTeX. Edite o corpo LaTeX seguindo a instrução do usuário. Retorne APENAS o corpo modificado (de \\begin{document} a \\end{document}), sem explicações, sem fence blocks. O preâmbulo é gerenciado externamente — não o inclua.",
+              `Você é um especialista em LaTeX. Edite o corpo LaTeX seguindo a instrução do usuário. Retorne APENAS o corpo modificado (de \\begin{document} a \\end{document}), sem explicações, sem fence blocks. O preâmbulo é gerenciado externamente — não o inclua.${imagePromptSection}`,
           },
           {
             role: "user",
@@ -683,6 +854,9 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
         })
         .where(eq(latexDocuments.id, id));
 
+      // Resolve images referenced in the edited LaTeX source
+      const images = await resolveImagesFromLatex(newSource, userId, db, c.env.R2);
+
       // Recompile
       const compileResult = await compileWithAutoFix(
         newSource,
@@ -691,6 +865,7 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
         provider,
         model,
         getMaxTokens(doc.sizeLevel),
+        images.length > 0 ? images : undefined,
       );
 
       if (compileResult.success && compileResult.pdfBase64) {
@@ -708,7 +883,7 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
             pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
             status: "completed",
             compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
             lastCompilationError: null,
             updatedAt: new Date().toISOString(),
           })
@@ -720,7 +895,7 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
             latexSource: compileResult.latexSource,
             status: "compile_error",
             compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
             lastCompilationError: compileResult.lastError ?? "Unknown error",
             updatedAt: new Date().toISOString(),
           })
@@ -893,56 +1068,125 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
 
   const bgWork = (async () => {
     try {
-      const provider = createAIProvider(regenAiProvider, apiKey);
-      const result = await provider.generate({
-        model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        maxTokens: getMaxTokens(sizeLevel),
-        temperature: 0.7,
-      });
-
-      let bodyLatex = extractLatexBody(result.content);
-
-      // Quality check: reject near-empty content
-      const qualityError = checkContentQuality(bodyLatex);
-      if (qualityError) {
-        await db
-          .update(latexDocuments)
-          .set({ status: "error", lastCompilationError: qualityError, updatedAt: new Date().toISOString() })
-          .where(eq(latexDocuments.id, newDocId));
-        return;
-      }
-
-      // Inject professional signature block before \end{document}
-      bodyLatex = injectSignatureBlock(bodyLatex, doc.documentType, student);
-
       const preamble = getLatexPreamble({
         documentTitle: typeName,
         studentName: student.name,
         schoolName: student.school ?? "Escola",
       });
-      const fullLatex = preamble + bodyLatex;
+      const signatureBlock = buildSignatureBlock(doc.documentType, student);
+      const regenMaxTokens = getMaxTokens(sizeLevel);
 
-      await db
-        .update(latexDocuments)
-        .set({
-          latexSource: fullLatex,
-          status: "compiling",
-          generatedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(latexDocuments.id, newDocId));
+      // --- Try local server (Claude API + pdflatex) first ---
+      const localResult = await generateAndCompile(
+        {
+          systemPrompt: system,
+          userPrompt: user,
+          preamble,
+          maxTokens: regenMaxTokens,
+          signatureBlock,
+        },
+        c.env.LATEX_COMPILER_URL,
+        c.env.LATEX_COMPILER_TOKEN,
+      );
 
+      if (localResult?.success && localResult.pdfBase64 && localResult.latexSource) {
+        console.log(`[regenerate] Local server succeeded (model: ${localResult.aiModel})`);
+        const r2Key = `latex-pdfs/${userId}/${newDocId}.pdf`;
+        const pdfBuffer = Uint8Array.from(atob(localResult.pdfBase64), (ch) => ch.charCodeAt(0));
+        await c.env.R2.put(r2Key, pdfBuffer, {
+          httpMetadata: { contentType: "application/pdf" },
+        });
+
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: localResult.latexSource,
+            pdfR2Key: r2Key,
+            pdfSizeBytes: localResult.pdfSizeBytes ?? pdfBuffer.length,
+            status: "completed",
+            compilationAttempts: localResult.attempts,
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(localResult.warnings ?? [])),
+            lastCompilationError: null,
+            aiModel: localResult.aiModel ?? model,
+            generatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, newDocId));
+        return;
+      }
+
+      // If local server generated LaTeX but compilation failed, use that LaTeX
+      let fullLatex: string | null = null;
+
+      if (localResult && !localResult.success && localResult.latexSource) {
+        console.log(`[regenerate] Local Claude generated LaTeX but compilation failed, trying auto-fix...`);
+        fullLatex = localResult.latexSource;
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: fullLatex,
+            status: "compiling",
+            aiModel: localResult.aiModel ?? model,
+            generatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, newDocId));
+      } else {
+        if (localResult) {
+          console.log(`[regenerate] Local server error: ${localResult.error}, falling back`);
+        } else {
+          console.log("[regenerate] Local server unavailable, falling back");
+        }
+
+        // --- Fallback: generate with Worker AI provider ---
+        const fallbackProvider = createAIProvider(regenAiProvider, apiKey);
+        const result = await fallbackProvider.generate({
+          model,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          maxTokens: regenMaxTokens,
+          temperature: 0.7,
+        });
+
+        let bodyLatex = extractLatexBody(result.content);
+
+        const qualityError = checkContentQuality(bodyLatex);
+        if (qualityError) {
+          await db
+            .update(latexDocuments)
+            .set({ status: "error", lastCompilationError: qualityError, updatedAt: new Date().toISOString() })
+            .where(eq(latexDocuments.id, newDocId));
+          return;
+        }
+
+        bodyLatex = injectSignatureBlock(bodyLatex, doc.documentType, student);
+        fullLatex = preamble + bodyLatex;
+
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: fullLatex,
+            status: "compiling",
+            generatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, newDocId));
+      }
+
+      // Resolve images referenced in the LaTeX source
+      const regenImages = await resolveImagesFromLatex(fullLatex!, userId, db, c.env.R2);
+
+      const provider = createAIProvider(regenAiProvider, apiKey);
       const compileResult = await compileWithAutoFix(
-        fullLatex,
+        fullLatex!,
         c.env.LATEX_COMPILER_URL,
         c.env.LATEX_COMPILER_TOKEN,
         provider,
         model,
-        getMaxTokens(sizeLevel),
+        regenMaxTokens,
+        regenImages.length > 0 ? regenImages : undefined,
       );
 
       if (compileResult.success && compileResult.pdfBase64) {
@@ -960,7 +1204,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
             pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
             status: "completed",
             compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
             lastCompilationError: null,
             updatedAt: new Date().toISOString(),
           })
@@ -972,7 +1216,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
             latexSource: compileResult.latexSource,
             status: "compile_error",
             compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(compileResult.warnings ?? []),
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
             lastCompilationError: compileResult.lastError ?? "Unknown compilation error",
             updatedAt: new Date().toISOString(),
           })

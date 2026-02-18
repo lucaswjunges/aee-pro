@@ -1,1 +1,2 @@
 /api/* https://aee-pro-api.lucaswilliamjunges.workers.dev/api/:splat 200
+/* /index.html 200

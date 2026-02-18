@@ -7,6 +7,7 @@ import { documentRoutes } from "./routes/documents";
 import { promptRoutes } from "./routes/prompts";
 import { dashboardRoutes } from "./routes/dashboard";
 import { latexDocumentRoutes } from "./routes/latex-documents";
+import { imageRoutes } from "./routes/images";
 
 export type Env = {
   Bindings: {
@@ -40,5 +41,6 @@ app.route("/api/documents", documentRoutes);
 app.route("/api/prompts", promptRoutes);
 app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/latex-documents", latexDocumentRoutes);
+app.route("/api/images", imageRoutes);
 
 export default app;

@@ -24,11 +24,11 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-br from-primary/10 via-background to-accent/30">
       <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-sm shadow-xl border-0 shadow-primary/10">
         <CardHeader className="text-center">
           <img src="/logo.png" alt="AEE+ PRO" className="h-12 mx-auto mb-2" />
           <CardDescription>Entre com sua conta para continuar</CardDescription>

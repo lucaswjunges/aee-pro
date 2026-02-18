@@ -13,8 +13,14 @@ app = FastAPI(title="AEE+ PRO LaTeX Compiler")
 AUTH_TOKEN = os.environ.get("COMPILER_AUTH_TOKEN", "")
 
 
+class ImagePayload(BaseModel):
+    filename: str
+    data_base64: str
+
+
 class CompileRequest(BaseModel):
     latex_source: str
+    images: list[ImagePayload] | None = None
 
 
 class CompileResponse(BaseModel):
@@ -50,6 +56,39 @@ def _extract_warnings(log_path: str) -> list[str]:
     return warnings
 
 
+MAX_IMAGES_TOTAL_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _prepare_images(images: list[ImagePayload] | None, tmpdir: str) -> bool:
+    """Decode images to tmpdir/images/. Returns True if images were written."""
+    if not images:
+        return False
+    images_dir = os.path.join(tmpdir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+    total_bytes = 0
+    for img in images:
+        data = base64.b64decode(img.data_base64)
+        total_bytes += len(data)
+        if total_bytes > MAX_IMAGES_TOTAL_BYTES:
+            raise ValueError(f"Total de imagens excede {MAX_IMAGES_TOTAL_BYTES // (1024*1024)}MB")
+        # Sanitize filename — only allow alphanumeric, dash, underscore, dot
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", img.filename)
+        with open(os.path.join(images_dir, safe_name), "wb") as f:
+            f.write(data)
+    return True
+
+
+def _enable_real_graphicx(latex_source: str) -> str:
+    """Replace draft graphicx with real graphicx and add graphicspath."""
+    # Use regex to handle optional comments/whitespace after the command
+    result = re.sub(
+        r"\\usepackage\[draft\]\{graphicx\}[^\n]*",
+        r"\\usepackage{graphicx}\n\\graphicspath{{./images/}}",
+        latex_source,
+    )
+    return result
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -71,9 +110,19 @@ def compile_latex(
     pdf_path = os.path.join(tmpdir, "document.pdf")
 
     try:
+        latex_source = req.latex_source
+
+        # Decode images and enable real graphicx if images provided
+        try:
+            has_images = _prepare_images(req.images, tmpdir)
+        except ValueError as e:
+            return CompileResponse(success=False, error=str(e))
+        if has_images:
+            latex_source = _enable_real_graphicx(latex_source)
+
         # Write .tex file
         with open(tex_path, "w", encoding="utf-8") as f:
-            f.write(req.latex_source)
+            f.write(latex_source)
 
         # Run pdflatex twice (for table of contents / references)
         for pass_num in range(2):
@@ -645,8 +694,18 @@ def convert_to_docx(
     docx_path = os.path.join(tmpdir, "document.docx")
 
     try:
+        latex_source = req.latex_source
+
+        # Decode images for pandoc conversion
+        try:
+            has_images = _prepare_images(req.images, tmpdir)
+        except ValueError as e:
+            return ConvertDocxResponse(success=False, error=str(e))
+        if has_images:
+            latex_source = _enable_real_graphicx(latex_source)
+
         # Preprocess: convert custom LaTeX to standard LaTeX
-        clean_latex = _preprocess_latex_for_pandoc(req.latex_source)
+        clean_latex = _preprocess_latex_for_pandoc(latex_source)
 
         with open(tex_path, "w", encoding="utf-8") as f:
             f.write(clean_latex)
@@ -702,6 +761,289 @@ def convert_to_docx(
         )
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# POST /generate-and-compile — Claude API + pdflatex in one shot
+# ---------------------------------------------------------------------------
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+
+import logging
+_log = logging.getLogger("aee-latex")
+
+
+class GenerateAndCompileRequest(BaseModel):
+    system_prompt: str
+    user_prompt: str
+    preamble: str
+    max_tokens: int = 16000
+    images: list[ImagePayload] | None = None
+    signature_block: str | None = None
+
+
+class GenerateAndCompileResponse(BaseModel):
+    success: bool
+    pdf_base64: str | None = None
+    pdf_size_bytes: int | None = None
+    latex_source: str | None = None
+    error: str | None = None
+    warnings: list[str] | None = None
+    attempts: int = 0
+    ai_model: str | None = None
+
+
+def _extract_latex_body(raw: str) -> str:
+    """Extract body from AI response (\\begin{document} to \\end{document})."""
+    cleaned = re.sub(r"```latex\s*", "", raw)
+    cleaned = re.sub(r"```\s*", "", cleaned).strip()
+
+    start = cleaned.find("\\begin{document}")
+    end = cleaned.rfind("\\end{document}")
+
+    if start != -1 and end != -1 and end > start:
+        body = cleaned[start : end + len("\\end{document}")]
+    elif start != -1:
+        body = cleaned[start:] + "\n\\end{document}"
+    else:
+        body = "\\begin{document}\n" + cleaned
+        if not body.rstrip().endswith("\\end{document}"):
+            body += "\n\\end{document}"
+
+    return body
+
+
+def _sanitize_latex(source: str) -> str:
+    """Remove problematic LaTeX constructs that commonly break compilation."""
+    # Remove \\foreach blocks with rnd
+    source = re.sub(
+        r"\\foreach\s+\\[a-zA-Z]+\s+in\s*\{[^}]*rnd[^}]*\}[^\n]*\n?",
+        "", source,
+    )
+    # Remove TeX conditionals
+    source = re.sub(r"\\if(?:num|dim|x|odd|case)\b[^\n]*\n?", "", source)
+    source = re.sub(r"^\s*\\(?:else|or)\s*$", "", source, flags=re.MULTILINE)
+    source = re.sub(r"^\s*\\fi\b\s*$", "", source, flags=re.MULTILINE)
+    # Remove inline \\pgfmathparse in color specs
+    source = re.sub(r"\\pgfmathparse\{[^}]*\}\\pgfmathresult", "50", source)
+    # Close unclosed environments
+    env_regex = re.compile(r"\\(begin|end)\{([^}]+)\}")
+    stack: list[str] = []
+    for m in env_regex.finditer(source):
+        if m.group(1) == "begin":
+            stack.append(m.group(2))
+        elif m.group(1) == "end" and stack and stack[-1] == m.group(2):
+            stack.pop()
+    if stack:
+        end_doc_idx = source.rfind("\\end{document}")
+        insert_point = end_doc_idx if end_doc_idx != -1 else len(source)
+        closings = "\n".join(f"\\end{{{env}}}" for env in reversed(stack) if env != "document")
+        if closings:
+            source = source[:insert_point] + "\n" + closings + "\n" + source[insert_point:]
+    return source
+
+
+def _compile_in_tmpdir(
+    latex_source: str,
+    images: list[ImagePayload] | None = None,
+) -> CompileResponse:
+    """Compile LaTeX in a fresh tmpdir. Handles cleanup."""
+    tmpdir = tempfile.mkdtemp(prefix="gencomp_")
+    try:
+        tex_path = os.path.join(tmpdir, "document.tex")
+        pdf_path = os.path.join(tmpdir, "document.pdf")
+
+        source = latex_source
+        try:
+            has_images = _prepare_images(images, tmpdir)
+        except ValueError as e:
+            return CompileResponse(success=False, error=str(e))
+        if has_images:
+            source = _enable_real_graphicx(source)
+
+        with open(tex_path, "w", encoding="utf-8") as f:
+            f.write(source)
+
+        for _ in range(2):
+            result = subprocess.run(
+                ["pdflatex", "-interaction=nonstopmode", "-halt-on-error",
+                 "-output-directory", tmpdir, tex_path],
+                capture_output=True, timeout=60, cwd=tmpdir,
+            )
+            if result.returncode != 0:
+                log_path = os.path.join(tmpdir, "document.log")
+                stdout = result.stdout.decode("utf-8", errors="replace") if result.stdout else ""
+                stderr = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
+                error_log = ""
+                if os.path.exists(log_path):
+                    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                        lines = f.readlines()
+                    error_lines = []
+                    capture = False
+                    for line in lines:
+                        if line.startswith("!") or capture:
+                            error_lines.append(line.rstrip())
+                            capture = True
+                            if len(error_lines) > 5:
+                                capture = False
+                        if len(error_lines) > 30:
+                            break
+                    error_log = "\n".join(error_lines) if error_lines else stdout[-2000:]
+                else:
+                    error_log = stdout[-2000:] if stdout else stderr[-2000:]
+                return CompileResponse(success=False, error=error_log[:3000])
+
+        if not os.path.exists(pdf_path):
+            return CompileResponse(success=False, error="PDF not generated")
+
+        log_path = os.path.join(tmpdir, "document.log")
+        warnings = _extract_warnings(log_path) or None
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        return CompileResponse(
+            success=True,
+            pdf_base64=base64.b64encode(pdf_bytes).decode("ascii"),
+            pdf_size_bytes=len(pdf_bytes),
+            warnings=warnings,
+        )
+    except subprocess.TimeoutExpired:
+        return CompileResponse(success=False, error="Compilation timed out (60s)")
+    except Exception as e:
+        return CompileResponse(success=False, error=f"Server error: {str(e)}")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+AUTOFIX_SYSTEM = """Você é um especialista em LaTeX. O código abaixo falhou na compilação com pdflatex.
+
+REGRAS DE CORREÇÃO:
+1. Corrija os erros mantendo o conteúdo e estilo.
+2. Se o documento está TRUNCADO (texto cortado), COMPLETE o conteúdo faltante.
+3. NUNCA use \\begin{axis}/pgfplots — substitua por tabelas com booktabs.
+4. NUNCA coloque longtable dentro de adjustbox, tcolorbox ou qualquer grupo.
+5. NUNCA use condicionais TeX (\\ifnum, \\ifcase, \\else, \\fi, \\or).
+6. NUNCA use \\foreach com rnd ou \\pgfmathparse inline em cores.
+7. NUNCA use \\multirowcell — use \\multirow{N}{*}{texto}.
+8. Todas as tcolorbox (infobox, alertbox, etc.) já são breakable — NÃO adicione breakable.
+9. \\rowcolor DEVE ser o PRIMEIRO comando de uma linha de tabela (nunca após &).
+10. Para tabelas que transbordam: envolva tabular em \\adjustbox{max width=\\linewidth}{...}.
+11. Se usar tabularx, SEMPRE inclua pelo menos uma coluna X.
+12. NUNCA use colunas X em longtable — X é exclusivo de tabularx.
+
+Retorne o código LaTeX corrigido COMPLETO (de \\begin{document} até \\end{document}), sem explicações, sem fence blocks."""
+
+
+@app.post("/generate-and-compile", response_model=GenerateAndCompileResponse)
+def generate_and_compile(
+    req: GenerateAndCompileRequest,
+    authorization: str = Header(default=""),
+):
+    """Generate LaTeX with Claude, compile locally, auto-fix iteratively."""
+    if AUTH_TOKEN:
+        token = authorization.removeprefix("Bearer ").strip()
+        if token != AUTH_TOKEN:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+
+    import anthropic
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    # --- Step 1: Generate LaTeX with Claude ---
+    _log.info(f"[generate] Calling {CLAUDE_MODEL} (max_tokens={req.max_tokens})...")
+    try:
+        response = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=req.max_tokens,
+            temperature=0.7,
+            system=req.system_prompt,
+            messages=[{"role": "user", "content": req.user_prompt}],
+        )
+        ai_content = response.content[0].text
+        ai_model = response.model
+        _log.info(f"[generate] Claude returned {len(ai_content)} chars")
+    except Exception as e:
+        _log.error(f"[generate] Claude API error: {e}")
+        return GenerateAndCompileResponse(
+            success=False, error=f"Claude API error: {str(e)}", ai_model=CLAUDE_MODEL,
+        )
+
+    # --- Step 2: Extract body, sanitize, assemble ---
+    body = _extract_latex_body(ai_content)
+
+    if req.signature_block:
+        end_doc_idx = body.rfind("\\end{document}")
+        if end_doc_idx != -1:
+            vfill_idx = body.rfind("\\vfill", 0, end_doc_idx)
+            insert_idx = vfill_idx if vfill_idx != -1 else end_doc_idx
+            body = body[:insert_idx] + "\n" + req.signature_block + "\n\n" + body[insert_idx:]
+
+    current_source = _sanitize_latex(req.preamble + body)
+
+    # --- Step 3: Compile → Claude fixes → recompile loop (up to 5 attempts) ---
+    MAX_ATTEMPTS = 5
+    last_error = None
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        _log.info(f"[compile] Attempt {attempt}/{MAX_ATTEMPTS}...")
+        result = _compile_in_tmpdir(current_source, req.images)
+
+        if result.success and result.pdf_base64:
+            _log.info(f"[compile] SUCCESS on attempt {attempt}! PDF={result.pdf_size_bytes} bytes")
+            return GenerateAndCompileResponse(
+                success=True,
+                pdf_base64=result.pdf_base64,
+                pdf_size_bytes=result.pdf_size_bytes,
+                latex_source=current_source,
+                warnings=result.warnings,
+                attempts=attempt,
+                ai_model=ai_model,
+            )
+
+        last_error = result.error
+        _log.warning(f"[compile] Attempt {attempt} FAILED: {(result.error or '')[:200]}")
+
+        if attempt == MAX_ATTEMPTS:
+            break
+
+        # Ask Claude to fix the error
+        _log.info(f"[auto-fix] Asking Claude to fix...")
+        try:
+            fix_response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=req.max_tokens,
+                temperature=0.2,
+                system=AUTOFIX_SYSTEM,
+                messages=[{
+                    "role": "user",
+                    "content": f"ERRO DE COMPILAÇÃO:\n{result.error}\n\nCÓDIGO LATEX COM ERRO:\n{current_source}",
+                }],
+            )
+            fixed_body = _extract_latex_body(fix_response.content[0].text)
+            fixed_body = _sanitize_latex(fixed_body)
+            _log.info(f"[auto-fix] Claude returned fix ({len(fixed_body)} chars)")
+
+            preamble_end = current_source.find("\\begin{document}")
+            if preamble_end != -1:
+                current_source = current_source[:preamble_end] + fixed_body
+            else:
+                current_source = req.preamble + fixed_body
+        except Exception as fix_err:
+            _log.error(f"[auto-fix] Claude call failed: {fix_err}")
+            last_error = f"Auto-fix failed: {str(fix_err)}"
+            break
+
+    _log.warning(f"[generate] All {MAX_ATTEMPTS} attempts failed")
+    return GenerateAndCompileResponse(
+        success=False,
+        latex_source=current_source,
+        error=last_error,
+        attempts=MAX_ATTEMPTS,
+        ai_model=ai_model,
+    )
 
 
 if __name__ == "__main__":

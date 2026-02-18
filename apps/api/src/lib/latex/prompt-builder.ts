@@ -269,35 +269,26 @@ export function buildSignatureBlock(
     : null;
   const locationDate = cityName
     ? `${escapeLatexText(cityName)}, ${today}`
-    : `\\hspace{5cm}, ${today}`;
+    : today;
 
   const lines: string[] = [];
 
-  lines.push(`\\vspace{1.5cm}`);
-  lines.push(`\\noindent ${locationDate}`);
+  // \par ensures we break from any preceding paragraph, \vfill pushes to page bottom
+  lines.push(`\\par\\vfill`);
+  lines.push(`\\begin{center}`);
+  lines.push(`${locationDate}`);
+  lines.push(`\\end{center}`);
   lines.push(`\\vspace{1.5cm}`);
 
-  // Use minipages inside a center environment for side-by-side signature blocks.
-  // Each pair is on the same line via \noindent + minipage + \hfill + minipage.
-  for (let i = 0; i < signatories.length; i += 2) {
-    const left = signatories[i];
-    const right = i + 1 < signatories.length ? signatories[i + 1] : null;
-    const leftName = left.name ? escapeLatexText(left.name) : "\\hspace{6cm}";
-
-    if (right) {
-      const rightName = right.name ? escapeLatexText(right.name) : "\\hspace{6cm}";
-      // All on one line (no blank lines between minipages!) to stay in same paragraph
-      lines.push(
-        `\\noindent\\begin{minipage}[t]{0.45\\textwidth}\\centering\\rule{6cm}{0.4pt}\\\\[4pt]\\textbf{${leftName}}\\\\\\small ${left.role}\\end{minipage}%` +
-        `\\hfill%` +
-        `\\begin{minipage}[t]{0.45\\textwidth}\\centering\\rule{6cm}{0.4pt}\\\\[4pt]\\textbf{${rightName}}\\\\\\small ${right.role}\\end{minipage}`,
-      );
-    } else {
-      lines.push(
-        `\\begin{center}\\rule{6cm}{0.4pt}\\\\[4pt]\\textbf{${leftName}}\\\\\\small ${left.role}\\end{center}`,
-      );
-    }
-    lines.push(`\\vspace{0.8cm}`);
+  // Centered signature blocks, one per line.
+  for (const sig of signatories) {
+    const name = sig.name ? escapeLatexText(sig.name) : "\\hspace{6cm}";
+    lines.push(`\\begin{center}`);
+    lines.push(`\\rule{6cm}{0.4pt}\\\\[4pt]`);
+    lines.push(`\\textbf{${name}}\\\\`);
+    lines.push(`\\small ${sig.role}`);
+    lines.push(`\\end{center}`);
+    lines.push(`\\vspace{0.5cm}`);
   }
 
   return lines.join("\n");
@@ -351,12 +342,17 @@ REGRAS CRÍTICAS:
 8. Em TikZ: sempre nomeie nodes com texto (ex: \\node (meunode) {...}), NUNCA use números puros como nome de node.
 9. NÃO use TikZ mindmap nem child trees. Para diagramas conceituais, use nodes individuais com positioning e setas (\\draw[-Latex]). Exemplo: \\node[draw,fill=aeeblue!20] (A) {Texto}; \\node[right=of A] (B) {Texto2}; \\draw[-Latex] (A)--(B);
 10. A data de hoje é ${today}.
-11. \\rowcolor DEVE ser o PRIMEIRO comando de uma linha de tabela (antes de qualquer &). NUNCA coloque \\rowcolor depois de &.
+11. \\rowcolor DEVE ser o PRIMEIRO comando de uma linha de tabela (antes de qualquer &). NUNCA coloque \\rowcolor depois de &. Para colorir CÉLULAS individuais, use \\cellcolor{cor} dentro da célula.
 12. Em tabelas, use \\makecell{linha1 \\\\ linha2} para quebrar texto CURTO dentro de uma célula. NUNCA coloque \\begin{itemize} ou \\begin{enumerate} dentro de \\makecell — causa erro "Not allowed in LR mode". Para listas dentro de tabelas, use colunas p{Xcm} ou X e coloque a lista diretamente na célula (sem makecell).
 13. Para multirow com texto longo, use \\multirow{N}{*}{texto} e NUNCA \\multirowcell.
 14. Em TikZ: use valores de coordenadas PEQUENOS (max 100). Dimensões muito grandes causam "Dimension too large". Para diagramas de nodes, use text width=4cm e node distance=10mm — diagramas TikZ NÃO quebram entre páginas, então DEVEM caber em MEIA PÁGINA no máximo.
 14b. Em TikZ: TODO o conteúdo de um node DEVE estar DENTRO do próprio node. NUNCA crie um node header e depois sobreponha outro node com \\node at (header.center). Isso causa texto sobreposto. Coloque o conteúdo completo (título + lista) dentro de UM ÚNICO node. Exemplo CORRETO: \\node[draw, text width=4cm] (A) {\\textbf{Título}\\\\\\begin{itemize}[leftmargin=*] \\item Item1 \\item Item2\\end{itemize}};
-15. TABELAS DEVEM CABER NA PÁGINA: use tabularx com largura \\textwidth e colunas X (auto-ajuste). Para tabelas com muitas colunas, envolva em \\adjustbox{max width=\\textwidth}{...}. NUNCA use colunas l/c/r para texto longo — use p{Xcm} ou X.
+15. TABELAS DEVEM CABER NA PÁGINA:
+  - Se usar tabularx, SEMPRE inclua pelo menos uma coluna X. tabularx SEM coluna X não funciona (causa overflow).
+  - Para tabelas simples: \\begin{tabularx}{\\textwidth}{lX} ou {p{3cm}X} — a coluna X absorve o espaço restante.
+  - NUNCA faça tabularx só com colunas p{} (ex: {p{3cm}p{4cm}p{5cm}}) — isso anula o propósito do tabularx.
+  - Se TODAS as colunas precisam de largura fixa: use tabular (NÃO tabularx) com adjustbox.
+  - NUNCA use colunas l/c/r para texto longo — use p{Ncm} ou X.
 16. Todas as tcolorbox já são breakable por padrão — NÃO adicione breakable manualmente. O argumento opcional é SOMENTE o título: \\begin{infobox}[Meu Título].
 17. Texto dentro de células de tabela DEVE ser curto. Se precisar de texto longo, use colunas p{} ou X com largura proporcional.
 18. PROIBIDO (causa erro fatal):
@@ -376,6 +372,7 @@ REGRAS CRÍTICAS:
   - Caixas tcolorbox: use o argumento de título (ex: \\begin{infobox}[Quadro 1 --- Estrutura da sessão])
   - Atividades: numere no título (ex: \\begin{atividadebox}[aeegreen]{\\starmark~Atividade 1: Nome da atividade})
   - Use numeração sequencial consistente no documento inteiro (Tabela 1, 2, 3...; Figura 1, 2...; Quadro 1, 2...).
+  - A capa NÃO conta como figura. A numeração de Figuras começa no primeiro diagrama TikZ de CONTEÚDO (após a capa).
 
 ${AVAILABLE_LATEX_REFERENCE}
 

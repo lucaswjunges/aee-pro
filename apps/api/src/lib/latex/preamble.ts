@@ -25,9 +25,17 @@ export function getLatexPreamble(options: PreambleOptions): string {
 \\onehalfspacing
 
 % --- Overflow prevention ---
-\\tolerance=1000
-\\emergencystretch=3em
-\\hbadness=2000
+\\tolerance=2000
+\\emergencystretch=5em
+\\hbadness=3000
+
+% --- Prevent orphan headings / widows / clubs ---
+% High penalties prevent a section heading from being the last thing on a page
+\\widowpenalty=10000
+\\clubpenalty=10000
+\\makeatletter
+\\@beginparpenalty=10000
+\\makeatother
 
 % --- Page Layout ---
 \\usepackage[
@@ -35,7 +43,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
   bottom=2.5cm,
   left=2.5cm,
   right=2.5cm,
-  headheight=28pt
+  headheight=36pt
 ]{geometry}
 
 % --- Colors ---
@@ -72,6 +80,9 @@ export function getLatexPreamble(options: PreambleOptions): string {
 \\usepackage{longtable}
 \\usepackage{adjustbox}
 
+% --- Prevent orphan headings (section title alone at bottom of page) ---
+\\usepackage{needspace}
+
 % --- Lists & Enumerations ---
 \\usepackage{pifont}
 \\usepackage{enumitem}
@@ -86,10 +97,11 @@ export function getLatexPreamble(options: PreambleOptions): string {
 
 % --- Headers & Footers ---
 \\usepackage{fancyhdr}
+\\usepackage[fit]{truncate}
 \\pagestyle{fancy}
 \\fancyhf{}
-\\fancyhead[L]{\\small\\color{textgray}\\textit{${escapeLatex(documentTitle)}}}
-\\fancyhead[R]{\\small\\color{textgray}\\textit{${escapeLatex(studentName)} --- ${escapeLatex(schoolName)}}}
+\\fancyhead[L]{\\small\\color{textgray}\\textit{\\truncate{0.45\\headwidth}{${escapeLatex(documentTitle)}}}}
+\\fancyhead[R]{\\small\\color{textgray}\\textit{\\truncate{0.45\\headwidth}{${escapeLatex(studentName)} --- ${escapeLatex(schoolName)}}}}
 \\fancyfoot[C]{\\small\\color{textgray}\\thepage}
 \\fancyfoot[R]{}
 \\renewcommand{\\headrulewidth}{0.4pt}
@@ -100,16 +112,16 @@ export function getLatexPreamble(options: PreambleOptions): string {
 % --- Section Formatting ---
 \\usepackage{titlesec}
 \\titleformat{\\section}
-  {\\Large\\bfseries\\color{aeeblue}}
+  {\\needspace{5\\baselineskip}\\Large\\bfseries\\color{aeeblue}}
   {\\thesection.}{0.5em}{}
   [\\vspace{-0.5em}{\\color{aeegold}\\rule{\\textwidth}{1.5pt}}]
 
 \\titleformat{\\subsection}
-  {\\large\\bfseries\\color{aeeblue!80}}
+  {\\needspace{4\\baselineskip}\\large\\bfseries\\color{aeeblue!80}}
   {\\thesubsection}{0.5em}{}
 
 \\titleformat{\\subsubsection}
-  {\\normalsize\\bfseries\\color{aeeblue!65}}
+  {\\needspace{3\\baselineskip}\\normalsize\\bfseries\\color{aeeblue!65}}
   {\\thesubsubsection}{0.5em}{}
 
 % --- Boxes ---
@@ -126,7 +138,8 @@ export function getLatexPreamble(options: PreambleOptions): string {
   boxrule=0.8pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   shadow={1mm}{-1mm}{0mm}{black!20},
-  before skip=10pt, after skip=10pt
+  before skip=10pt, after skip=10pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{alertbox}[1][]{
@@ -139,7 +152,8 @@ export function getLatexPreamble(options: PreambleOptions): string {
   rounded corners,
   boxrule=0.8pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
-  before skip=10pt, after skip=10pt
+  before skip=10pt, after skip=10pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{successbox}[1][]{
@@ -152,7 +166,8 @@ export function getLatexPreamble(options: PreambleOptions): string {
   rounded corners,
   boxrule=0.8pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
-  before skip=10pt, after skip=10pt
+  before skip=10pt, after skip=10pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{datacard}{
@@ -162,7 +177,8 @@ export function getLatexPreamble(options: PreambleOptions): string {
   rounded corners,
   boxrule=0.5pt,
   left=10pt, right=10pt, top=8pt, bottom=8pt,
-  before skip=8pt, after skip=8pt
+  before skip=8pt, after skip=8pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{atividadebox}[2][]{
@@ -178,7 +194,8 @@ export function getLatexPreamble(options: PreambleOptions): string {
   shadow={1mm}{-1mm}{0mm}{black!15},
   before skip=12pt, after skip=12pt,
   attach boxed title to top left={yshift=-2mm, xshift=5mm},
-  boxed title style={rounded corners, colback=#1!60}
+  boxed title style={rounded corners, colback=#1!60},
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{dicabox}[1][]{
@@ -191,7 +208,8 @@ export function getLatexPreamble(options: PreambleOptions): string {
   rounded corners,
   boxrule=0.5pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
-  before skip=8pt, after skip=8pt
+  before skip=8pt, after skip=8pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{materialbox}{
@@ -201,7 +219,8 @@ export function getLatexPreamble(options: PreambleOptions): string {
   rounded corners,
   boxrule=0.4pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
-  before skip=6pt, after skip=6pt
+  before skip=6pt, after skip=6pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{sessaobox}[1][]{
@@ -216,7 +235,8 @@ export function getLatexPreamble(options: PreambleOptions): string {
   left=10pt, right=10pt, top=8pt, bottom=8pt,
   shadow={1.5mm}{-1.5mm}{0mm}{black!10},
   before skip=14pt, after skip=14pt,
-  toptitle=3pt, bottomtitle=3pt
+  toptitle=3pt, bottomtitle=3pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcbox{\\objtag}[1][aeeblue]{
@@ -232,6 +252,10 @@ export function getLatexPreamble(options: PreambleOptions): string {
 \\SetWatermarkScale{0.4}
 \\SetWatermarkColor{aeeblue!5}
 \\SetWatermarkAngle{45}
+
+% --- URL breaking (must load before hyperref) ---
+\\usepackage[hyphens]{url}
+\\usepackage{xurl}
 
 % --- Hyperlinks ---
 \\usepackage[

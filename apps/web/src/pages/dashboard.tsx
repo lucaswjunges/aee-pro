@@ -82,16 +82,20 @@ export function DashboardPage() {
         <h1 className="text-2xl font-bold">
           Olá, {user?.name?.split(" ")[0]}!
         </h1>
-        <p className="text-muted-foreground">Bem-vindo(a) ao AEE+ PRO</p>
+        <p className="text-muted-foreground">
+          Gerencie seus alunos e documentos de forma simples e rápida
+        </p>
       </div>
 
       {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Link to="/alunos">
-          <Card className="cursor-pointer hover:bg-accent/50 transition-colors">
+          <Card className="cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Alunos</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <div className="rounded-lg bg-blue-100 dark:bg-blue-900/40 p-2">
+                <Users className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              </div>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
@@ -103,10 +107,12 @@ export function DashboardPage() {
         </Link>
 
         <Link to="/documentos">
-          <Card className="cursor-pointer hover:bg-accent/50 transition-colors">
+          <Card className="cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Documentos</CardTitle>
-              <FileText className="h-4 w-4 text-muted-foreground" />
+              <div className="rounded-lg bg-purple-100 dark:bg-purple-900/40 p-2">
+                <FileText className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+              </div>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
@@ -118,13 +124,15 @@ export function DashboardPage() {
         </Link>
 
         <Link to="/documentos?status=completed">
-          <Card className="cursor-pointer hover:bg-accent/50 transition-colors">
+          <Card className="cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Concluídos</CardTitle>
-              <CheckCircle className="h-4 w-4 text-green-600" />
+              <div className="rounded-lg bg-emerald-100 dark:bg-emerald-900/40 p-2">
+                <CheckCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">
+              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
                 {loading ? <Skeleton className="h-8 w-12" /> : stats?.completedDocs ?? 0}
               </div>
               <p className="text-xs text-muted-foreground mt-1">documentos prontos</p>
@@ -133,13 +141,15 @@ export function DashboardPage() {
         </Link>
 
         <Link to="/documentos?status=error">
-          <Card className="cursor-pointer hover:bg-accent/50 transition-colors">
+          <Card className="cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Com Erro</CardTitle>
-              <AlertCircle className="h-4 w-4 text-red-500" />
+              <div className="rounded-lg bg-red-100 dark:bg-red-900/40 p-2">
+                <AlertCircle className="h-4 w-4 text-red-500 dark:text-red-400" />
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-red-500">
+              <div className="text-2xl font-bold text-red-500 dark:text-red-400">
                 {loading ? <Skeleton className="h-8 w-12" /> : stats?.errorDocs ?? 0}
               </div>
               <p className="text-xs text-muted-foreground mt-1">precisam atenção</p>
