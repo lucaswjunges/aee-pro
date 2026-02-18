@@ -98,7 +98,8 @@ export async function generateAndCompile(
   if (!compilerUrl) return null;
 
   const controller = new AbortController();
-  const connectTimeout = setTimeout(() => controller.abort(), 8000);
+  // Claude generation + compilation + auto-fix can take 2-3 minutes
+  const connectTimeout = setTimeout(() => controller.abort(), 180_000);
 
   let res: Response;
   try {

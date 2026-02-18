@@ -209,8 +209,12 @@ latexDocumentRoutes.post("/generate", async (c) => {
   const newDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, docId)).get();
   const aiProvider = settings.aiProvider!;
 
-  const bgWork = (async () => {
+  // Process synchronously — waitUntil is unreliable on Workers free tier.
+  // The frontend polls for status, so it doesn't matter if this takes time.
+  // Workers allow unlimited I/O wait time; only CPU is limited to 10ms.
+  const processGeneration = async () => {
     try {
+      console.log(`[generate] Starting for doc ${docId}, compiler: ${c.env.LATEX_COMPILER_URL}`);
       const preamble = getLatexPreamble({
         documentTitle: typeName,
         studentName: student.name,
@@ -219,6 +223,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
       const signatureBlock = buildSignatureBlock(body.documentType, student);
 
       // --- Try local server (Claude API + pdflatex) first ---
+      console.log("[generate] Trying generateAndCompile...");
       const localResult = await generateAndCompile(
         {
           systemPrompt: system,
@@ -258,11 +263,10 @@ latexDocumentRoutes.post("/generate", async (c) => {
       }
 
       // If local server generated LaTeX but compilation failed, use that LaTeX
-      // and try compiling via the standard auto-fix pipeline
       let fullLatex: string | null = null;
 
       if (localResult && !localResult.success && localResult.latexSource) {
-        console.log(`[generate] Local Claude generated LaTeX but compilation failed: ${localResult.error?.slice(0, 100)}, trying auto-fix pipeline...`);
+        console.log(`[generate] Local Claude generated LaTeX but compilation failed: ${localResult.error?.slice(0, 100)}, trying auto-fix...`);
         fullLatex = localResult.latexSource;
         await db
           .update(latexDocuments)
@@ -276,12 +280,13 @@ latexDocumentRoutes.post("/generate", async (c) => {
           .where(eq(latexDocuments.id, docId));
       } else {
         if (localResult) {
-          console.log(`[generate] Local server returned error: ${localResult.error}, falling back to Worker AI`);
+          console.log(`[generate] Local server error: ${localResult.error}, falling back`);
         } else {
           console.log("[generate] Local server unavailable, falling back to Worker AI");
         }
 
         // --- Fallback: generate with Worker AI provider ---
+        console.log(`[generate] Using ${aiProvider}/${model} via Worker AI`);
         const provider = createAIProvider(aiProvider, apiKey);
         const result = await provider.generate({
           model,
@@ -295,7 +300,6 @@ latexDocumentRoutes.post("/generate", async (c) => {
 
         let body_latex = extractLatexBody(result.content);
 
-        // Quality check: reject near-empty content
         const qualityError = checkContentQuality(body_latex);
         if (qualityError) {
           await db
@@ -305,9 +309,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
           return;
         }
 
-        // Inject professional signature block before \end{document}
         body_latex = injectSignatureBlock(body_latex, body.documentType, student);
-
         fullLatex = preamble + body_latex;
 
         await db
@@ -321,10 +323,9 @@ latexDocumentRoutes.post("/generate", async (c) => {
           .where(eq(latexDocuments.id, docId));
       }
 
-      // Resolve images referenced in the LaTeX source
+      // Compile with auto-fix
+      console.log("[generate] Starting compilation with auto-fix...");
       const images = await resolveImagesFromLatex(fullLatex!, userId, db, c.env.R2);
-
-      // Create AI provider for auto-fix pipeline
       const provider = createAIProvider(aiProvider, apiKey);
       const compileResult = await compileWithAutoFix(
         fullLatex!,
@@ -337,6 +338,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
       );
 
       if (compileResult.success && compileResult.pdfBase64) {
+        console.log(`[generate] Compilation succeeded after ${compileResult.attempts} attempts`);
         const r2Key = `latex-pdfs/${userId}/${docId}.pdf`;
         const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
         await c.env.R2.put(r2Key, pdfBuffer, {
@@ -357,6 +359,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
           })
           .where(eq(latexDocuments.id, docId));
       } else {
+        console.log(`[generate] Compilation failed: ${compileResult.lastError?.slice(0, 200)}`);
         await db
           .update(latexDocuments)
           .set({
@@ -370,16 +373,20 @@ latexDocumentRoutes.post("/generate", async (c) => {
           .where(eq(latexDocuments.id, docId));
       }
     } catch (err) {
+      console.error(`[generate] Fatal error for doc ${docId}:`, err);
       const errorMsg = err instanceof Error ? err.message : "Erro desconhecido na geração";
       await db
         .update(latexDocuments)
         .set({ status: "error", lastCompilationError: errorMsg, updatedAt: new Date().toISOString() })
-        .where(eq(latexDocuments.id, docId));
+        .where(eq(latexDocuments.id, docId))
+        .catch(() => {}); // Don't let DB error mask the original error
     }
-  })();
+  };
 
-  c.executionCtx.waitUntil(bgWork);
-  return c.json({ success: true, data: newDoc }, 201);
+  // Run synchronously — waitUntil is unreliable on Workers free tier
+  await processGeneration();
+  const finalDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, docId)).get();
+  return c.json({ success: true, data: finalDoc }, 201);
 });
 
 // ---------- GET / ----------
@@ -651,9 +658,9 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
 
   const latexSource = doc.latexSource!;
 
-  const bgWork = (async () => {
+  const processRecompile = async () => {
     try {
-      // Resolve images referenced in the LaTeX source
+      console.log(`[recompile] Starting for doc ${id}, compiler: ${c.env.LATEX_COMPILER_URL}`);
       const images = await resolveImagesFromLatex(latexSource, userId, db, c.env.R2);
       const imagesParam = images.length > 0 ? images : undefined;
 
@@ -668,6 +675,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
         }
 
         if (apiKey) {
+          console.log(`[recompile] Using auto-fix with ${settings.aiProvider}`);
           const provider = createAIProvider(settings.aiProvider, apiKey);
           const model = normalizeModelForProvider(settings.aiModel || getLatexModel(settings.aiProvider), settings.aiProvider);
           compileResult = await compileWithAutoFix(
@@ -682,14 +690,15 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
         }
       }
 
-      // Fallback: compile without auto-fix (still sanitize)
       if (!compileResult) {
+        console.log("[recompile] No AI provider, compiling without auto-fix");
         const sanitized = sanitizeLatexSource(latexSource);
         const raw = await compileLatex(sanitized, c.env.LATEX_COMPILER_URL, c.env.LATEX_COMPILER_TOKEN, imagesParam);
         compileResult = { ...raw, latexSource: sanitized, attempts: 1 };
       }
 
       if (compileResult.success && compileResult.pdfBase64) {
+        console.log(`[recompile] Success after ${compileResult.attempts} attempts`);
         const r2Key = `latex-pdfs/${userId}/${id}.pdf`;
         const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
         await c.env.R2.put(r2Key, pdfBuffer, {
@@ -710,6 +719,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
           })
           .where(eq(latexDocuments.id, id));
       } else {
+        console.log(`[recompile] Failed: ${compileResult.lastError?.slice(0, 200)}`);
         await db
           .update(latexDocuments)
           .set({
@@ -722,6 +732,7 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
           .where(eq(latexDocuments.id, id));
       }
     } catch (err) {
+      console.error(`[recompile] Fatal error for doc ${id}:`, err);
       const errorMsg = err instanceof Error ? err.message : "Erro desconhecido";
       await db
         .update(latexDocuments)
@@ -730,12 +741,15 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
           lastCompilationError: `Erro na compilação: ${errorMsg}`,
           updatedAt: new Date().toISOString(),
         })
-        .where(eq(latexDocuments.id, id));
+        .where(eq(latexDocuments.id, id))
+        .catch(() => {});
     }
-  })();
+  };
 
-  c.executionCtx.waitUntil(bgWork);
-  return c.json({ success: true, data: updated });
+  // Run synchronously — waitUntil is unreliable on Workers free tier
+  await processRecompile();
+  const finalDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, id)).get();
+  return c.json({ success: true, data: finalDoc });
 });
 
 // ---------- POST /:id/edit-ai ----------
@@ -914,8 +928,10 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
     }
   })();
 
-  c.executionCtx.waitUntil(bgWork);
-  return c.json({ success: true, data: updated });
+  // Run synchronously — waitUntil is unreliable on Workers free tier
+  await bgWork;
+  const finalDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, id)).get();
+  return c.json({ success: true, data: finalDoc });
 });
 
 // ---------- PUT /:id ----------
@@ -1066,8 +1082,9 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
   const newDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, newDocId)).get();
   const regenAiProvider = settings.aiProvider!;
 
-  const bgWork = (async () => {
+  const processRegenerate = async () => {
     try {
+      console.log(`[regenerate] Starting for doc ${newDocId}, compiler: ${c.env.LATEX_COMPILER_URL}`);
       const preamble = getLatexPreamble({
         documentTitle: typeName,
         studentName: student.name,
@@ -1076,7 +1093,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
       const signatureBlock = buildSignatureBlock(doc.documentType, student);
       const regenMaxTokens = getMaxTokens(sizeLevel);
 
-      // --- Try local server (Claude API + pdflatex) first ---
+      console.log("[regenerate] Trying generateAndCompile...");
       const localResult = await generateAndCompile(
         {
           systemPrompt: system,
@@ -1115,7 +1132,6 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
         return;
       }
 
-      // If local server generated LaTeX but compilation failed, use that LaTeX
       let fullLatex: string | null = null;
 
       if (localResult && !localResult.success && localResult.latexSource) {
@@ -1132,13 +1148,8 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
           })
           .where(eq(latexDocuments.id, newDocId));
       } else {
-        if (localResult) {
-          console.log(`[regenerate] Local server error: ${localResult.error}, falling back`);
-        } else {
-          console.log("[regenerate] Local server unavailable, falling back");
-        }
+        console.log(`[regenerate] ${localResult ? `Local error: ${localResult.error}` : "Local unavailable"}, falling back to ${regenAiProvider}/${model}`);
 
-        // --- Fallback: generate with Worker AI provider ---
         const fallbackProvider = createAIProvider(regenAiProvider, apiKey);
         const result = await fallbackProvider.generate({
           model,
@@ -1175,9 +1186,8 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
           .where(eq(latexDocuments.id, newDocId));
       }
 
-      // Resolve images referenced in the LaTeX source
+      console.log("[regenerate] Starting compilation...");
       const regenImages = await resolveImagesFromLatex(fullLatex!, userId, db, c.env.R2);
-
       const provider = createAIProvider(regenAiProvider, apiKey);
       const compileResult = await compileWithAutoFix(
         fullLatex!,
@@ -1190,6 +1200,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
       );
 
       if (compileResult.success && compileResult.pdfBase64) {
+        console.log(`[regenerate] Compilation succeeded after ${compileResult.attempts} attempts`);
         const r2Key = `latex-pdfs/${userId}/${newDocId}.pdf`;
         const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
         await c.env.R2.put(r2Key, pdfBuffer, {
@@ -1210,6 +1221,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
           })
           .where(eq(latexDocuments.id, newDocId));
       } else {
+        console.log(`[regenerate] Compilation failed: ${compileResult.lastError?.slice(0, 200)}`);
         await db
           .update(latexDocuments)
           .set({
@@ -1223,14 +1235,18 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
           .where(eq(latexDocuments.id, newDocId));
       }
     } catch (err) {
+      console.error(`[regenerate] Fatal error for doc ${newDocId}:`, err);
       const errorMsg = err instanceof Error ? err.message : "Erro desconhecido";
       await db
         .update(latexDocuments)
         .set({ status: "error", lastCompilationError: errorMsg, updatedAt: new Date().toISOString() })
-        .where(eq(latexDocuments.id, newDocId));
+        .where(eq(latexDocuments.id, newDocId))
+        .catch(() => {});
     }
-  })();
+  };
 
-  c.executionCtx.waitUntil(bgWork);
-  return c.json({ success: true, data: newDoc }, 201);
+  // Run synchronously — waitUntil is unreliable on Workers free tier
+  await processRegenerate();
+  const finalDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, newDocId)).get();
+  return c.json({ success: true, data: finalDoc }, 201);
 });
