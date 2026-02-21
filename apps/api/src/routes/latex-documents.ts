@@ -331,6 +331,10 @@ latexDocumentRoutes.post("/generate", async (c) => {
             doc_id: docId,
             callback_url: callbackUrl,
             callback_token: c.env.LATEX_COMPILER_TOKEN,
+            // Fallback: if service key is out of credits, use user's Anthropic key
+            ...(settings.aiProvider === "anthropic" && apiKey
+              ? { fallback_api_key: apiKey, fallback_model: model }
+              : {}),
           }),
           signal: AbortSignal.timeout(30_000),
         });
@@ -1104,6 +1108,10 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
             doc_id: newDocId,
             callback_url: callbackUrl,
             callback_token: c.env.LATEX_COMPILER_TOKEN,
+            // Fallback: if service key is out of credits, use user's Anthropic key
+            ...(settings.aiProvider === "anthropic" && apiKey
+              ? { fallback_api_key: apiKey, fallback_model: model }
+              : {}),
           }),
           signal: AbortSignal.timeout(30_000),
         });

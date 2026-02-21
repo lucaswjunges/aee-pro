@@ -787,6 +787,9 @@ class GenerateAndCompileRequest(BaseModel):
     doc_id: str = ""
     callback_url: str = ""
     callback_token: str = ""
+    # Fallback credentials — used if service ANTHROPIC_API_KEY is out of credits
+    fallback_api_key: str = ""
+    fallback_model: str = ""
 
 
 class GenerateAndCompileResponse(BaseModel):
@@ -949,28 +952,55 @@ REGRAS DE CORREÇÃO:
 Retorne o código LaTeX corrigido COMPLETO (de \\begin{document} até \\end{document}), sem explicações, sem fence blocks."""
 
 
+def _is_credit_error(e: Exception) -> bool:
+    """Return True if the exception is an Anthropic credit exhaustion error."""
+    return "credit balance is too low" in str(e).lower()
+
+
 def _do_generate_and_compile(req: GenerateAndCompileRequest) -> dict:
     """Sync: generate LaTeX with Claude, compile + auto-fix. Returns dict."""
     import anthropic
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     # --- Step 1: Generate LaTeX with Claude (streaming) ---
-    _log.info(f"[generate] doc_id={req.doc_id!r} Calling {CLAUDE_MODEL} (max_tokens={req.max_tokens})...")
+    # Try primary service key first; fall back to user key on credit error.
+    keys_to_try: list[tuple[str, str]] = [(ANTHROPIC_API_KEY, CLAUDE_MODEL)]
+    if req.fallback_api_key:
+        fallback_model = req.fallback_model or CLAUDE_MODEL
+        keys_to_try.append((req.fallback_api_key, fallback_model))
+
+    ai_content = None
     ai_model = CLAUDE_MODEL
-    try:
-        with client.messages.stream(
-            model=CLAUDE_MODEL,
-            max_tokens=req.max_tokens,
-            temperature=0.7,
-            system=req.system_prompt,
-            messages=[{"role": "user", "content": req.user_prompt}],
-        ) as stream:
-            ai_content = stream.get_final_text()
-            ai_model = stream.get_final_message().model
-        _log.info(f"[generate] Claude returned {len(ai_content)} chars")
-    except Exception as e:
-        _log.error(f"[generate] Claude API error: {e}")
-        return {"success": False, "error": f"Claude API error: {str(e)}", "ai_model": CLAUDE_MODEL, "attempts": 0}
+    last_gen_error = None
+
+    for api_key, model in keys_to_try:
+        if not api_key:
+            continue
+        client = anthropic.Anthropic(api_key=api_key)
+        _log.info(f"[generate] doc_id={req.doc_id!r} Calling {model} (max_tokens={req.max_tokens}, key=...{api_key[-6:]})")
+        try:
+            with client.messages.stream(
+                model=model,
+                max_tokens=req.max_tokens,
+                temperature=0.7,
+                system=req.system_prompt,
+                messages=[{"role": "user", "content": req.user_prompt}],
+            ) as stream:
+                ai_content = stream.get_final_text()
+                ai_model = stream.get_final_message().model
+            _log.info(f"[generate] Claude returned {len(ai_content)} chars")
+            last_gen_error = None
+            break  # success — stop trying keys
+        except Exception as e:
+            last_gen_error = e
+            if _is_credit_error(e) and req.fallback_api_key and api_key != req.fallback_api_key:
+                _log.warning(f"[generate] doc_id={req.doc_id!r} Credit exhausted on service key — retrying with user key")
+                continue
+            _log.error(f"[generate] Claude API error: {e}")
+            break
+
+    if ai_content is None:
+        err_msg = f"Claude API error: {str(last_gen_error)}" if last_gen_error else "Claude API error: no key available"
+        return {"success": False, "error": err_msg, "ai_model": ai_model, "attempts": 0}
 
     # --- Step 2: Extract body, sanitize, assemble ---
     body = _extract_latex_body(ai_content)
@@ -1014,7 +1044,7 @@ def _do_generate_and_compile(req: GenerateAndCompileRequest) -> dict:
         _log.info(f"[auto-fix] doc_id={req.doc_id!r} Asking Claude to fix...")
         try:
             with client.messages.stream(
-                model=CLAUDE_MODEL,
+                model=ai_model,
                 max_tokens=req.max_tokens,
                 temperature=0.2,
                 system=AUTOFIX_SYSTEM,
