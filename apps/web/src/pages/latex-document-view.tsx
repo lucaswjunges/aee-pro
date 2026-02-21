@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Download,
@@ -66,12 +66,14 @@ function CompilationWarnings({ warnings }: { warnings: string[] }) {
 
 export function LatexDocumentViewPage() {
   const { id, docId } = useParams<{ id: string; docId: string }>();
+  const navigate = useNavigate();
   const [document, setDocument] = useState<LatexDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>("pdf");
   const [editedSource, setEditedSource] = useState("");
   const [recompiling, setRecompiling] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const voceSabia = useMemo(() => VOCE_SABIA[Math.floor(Math.random() * VOCE_SABIA.length)], []);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -205,6 +207,16 @@ export function LatexDocumentViewPage() {
     await handleEditAI("Corrija os erros de compilação LaTeX neste documento. Mantenha o conteúdo e estilo.");
   };
 
+  const handleRegenerate = async () => {
+    if (!docId || !id) return;
+    setRegenerating(true);
+    const res = await api.post<LatexDocument>(`/latex-documents/${docId}/regenerate`, {});
+    setRegenerating(false);
+    if (res.success && res.data) {
+      navigate(`/alunos/${id}/documentos-latex/${res.data.id}`);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -326,10 +338,26 @@ export function LatexDocumentViewPage() {
 
       {/* Compilation error */}
       {document.status === "compile_error" && document.lastCompilationError && (
-        <CompilationError
-          error={document.lastCompilationError}
-          onFixWithAI={handleFixWithAI}
-        />
+        <div className="space-y-2">
+          <CompilationError
+            error={document.lastCompilationError}
+            onFixWithAI={handleFixWithAI}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            className="print:hidden"
+          >
+            {regenerating ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4 mr-1" />
+            )}
+            {regenerating ? "Regenerando..." : "Regenerar do Zero"}
+          </Button>
+        </div>
       )}
 
       {/* Compilation warnings */}
@@ -401,8 +429,23 @@ export function LatexDocumentViewPage() {
       )}
 
       {document.status === "error" && (
-        <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive print:hidden">
-          Erro na geração: {document.lastCompilationError}
+        <div className="space-y-2 print:hidden">
+          <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+            Erro na geração: {document.lastCompilationError}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRegenerate}
+            disabled={regenerating}
+          >
+            {regenerating ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4 mr-1" />
+            )}
+            {regenerating ? "Regenerando..." : "Regenerar do Zero"}
+          </Button>
         </div>
       )}
     </div>
