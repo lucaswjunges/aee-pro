@@ -4,8 +4,10 @@ import base64
 import subprocess
 import tempfile
 import shutil
+import json as json_lib
+import urllib.request
 
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, BackgroundTasks, Response
 from pydantic import BaseModel
 
 app = FastAPI(title="AEE+ PRO LaTeX Compiler")
@@ -768,7 +770,7 @@ def convert_to_docx(
 # ---------------------------------------------------------------------------
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 import logging
 _log = logging.getLogger("aee-latex")
@@ -781,6 +783,10 @@ class GenerateAndCompileRequest(BaseModel):
     max_tokens: int = 16000
     images: list[ImagePayload] | None = None
     signature_block: str | None = None
+    # Webhook fields — if set, endpoint returns 202 and processes asynchronously
+    doc_id: str = ""
+    callback_url: str = ""
+    callback_token: str = ""
 
 
 class GenerateAndCompileResponse(BaseModel):
@@ -816,6 +822,14 @@ def _extract_latex_body(raw: str) -> str:
 
 def _sanitize_latex(source: str) -> str:
     """Remove problematic LaTeX constructs that commonly break compilation."""
+    # Strip emoji and supplemental Unicode characters that pdflatex cannot process.
+    # pdflatex only supports characters declared in utf8.def (Latin-1 + some extensions).
+    # Emoji (U+1F000+), Misc Symbols (U+2600-U+27BF), and other high-plane characters
+    # cause a fatal "Unicode character not set up for use with LaTeX" error.
+    source = re.sub(
+        r"[\U00002600-\U000027BF\U0001F000-\U0010FFFF]",
+        "", source,
+    )
     # Remove \\foreach blocks with rnd
     source = re.sub(
         r"\\foreach\s+\\[a-zA-Z]+\s+in\s*\{[^}]*rnd[^}]*\}[^\n]*\n?",
@@ -935,41 +949,28 @@ REGRAS DE CORREÇÃO:
 Retorne o código LaTeX corrigido COMPLETO (de \\begin{document} até \\end{document}), sem explicações, sem fence blocks."""
 
 
-@app.post("/generate-and-compile", response_model=GenerateAndCompileResponse)
-def generate_and_compile(
-    req: GenerateAndCompileRequest,
-    authorization: str = Header(default=""),
-):
-    """Generate LaTeX with Claude, compile locally, auto-fix iteratively."""
-    if AUTH_TOKEN:
-        token = authorization.removeprefix("Bearer ").strip()
-        if token != AUTH_TOKEN:
-            raise HTTPException(status_code=401, detail="Unauthorized")
-
-    if not ANTHROPIC_API_KEY:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
-
+def _do_generate_and_compile(req: GenerateAndCompileRequest) -> dict:
+    """Sync: generate LaTeX with Claude, compile + auto-fix. Returns dict."""
     import anthropic
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    # --- Step 1: Generate LaTeX with Claude ---
-    _log.info(f"[generate] Calling {CLAUDE_MODEL} (max_tokens={req.max_tokens})...")
+    # --- Step 1: Generate LaTeX with Claude (streaming) ---
+    _log.info(f"[generate] doc_id={req.doc_id!r} Calling {CLAUDE_MODEL} (max_tokens={req.max_tokens})...")
+    ai_model = CLAUDE_MODEL
     try:
-        response = client.messages.create(
+        with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=req.max_tokens,
             temperature=0.7,
             system=req.system_prompt,
             messages=[{"role": "user", "content": req.user_prompt}],
-        )
-        ai_content = response.content[0].text
-        ai_model = response.model
+        ) as stream:
+            ai_content = stream.get_final_text()
+            ai_model = stream.get_final_message().model
         _log.info(f"[generate] Claude returned {len(ai_content)} chars")
     except Exception as e:
         _log.error(f"[generate] Claude API error: {e}")
-        return GenerateAndCompileResponse(
-            success=False, error=f"Claude API error: {str(e)}", ai_model=CLAUDE_MODEL,
-        )
+        return {"success": False, "error": f"Claude API error: {str(e)}", "ai_model": CLAUDE_MODEL, "attempts": 0}
 
     # --- Step 2: Extract body, sanitize, assemble ---
     body = _extract_latex_body(ai_content)
@@ -988,31 +989,31 @@ def generate_and_compile(
     last_error = None
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        _log.info(f"[compile] Attempt {attempt}/{MAX_ATTEMPTS}...")
+        _log.info(f"[compile] doc_id={req.doc_id!r} Attempt {attempt}/{MAX_ATTEMPTS}...")
         result = _compile_in_tmpdir(current_source, req.images)
 
         if result.success and result.pdf_base64:
-            _log.info(f"[compile] SUCCESS on attempt {attempt}! PDF={result.pdf_size_bytes} bytes")
-            return GenerateAndCompileResponse(
-                success=True,
-                pdf_base64=result.pdf_base64,
-                pdf_size_bytes=result.pdf_size_bytes,
-                latex_source=current_source,
-                warnings=result.warnings,
-                attempts=attempt,
-                ai_model=ai_model,
-            )
+            _log.info(f"[compile] doc_id={req.doc_id!r} SUCCESS attempt {attempt}! PDF={result.pdf_size_bytes} bytes")
+            return {
+                "success": True,
+                "pdf_base64": result.pdf_base64,
+                "pdf_size_bytes": result.pdf_size_bytes,
+                "latex_source": current_source,
+                "warnings": result.warnings,
+                "attempts": attempt,
+                "ai_model": ai_model,
+            }
 
         last_error = result.error
-        _log.warning(f"[compile] Attempt {attempt} FAILED: {(result.error or '')[:200]}")
+        _log.warning(f"[compile] doc_id={req.doc_id!r} Attempt {attempt} FAILED: {(result.error or '')[:200]}")
 
         if attempt == MAX_ATTEMPTS:
             break
 
         # Ask Claude to fix the error
-        _log.info(f"[auto-fix] Asking Claude to fix...")
+        _log.info(f"[auto-fix] doc_id={req.doc_id!r} Asking Claude to fix...")
         try:
-            fix_response = client.messages.create(
+            with client.messages.stream(
                 model=CLAUDE_MODEL,
                 max_tokens=req.max_tokens,
                 temperature=0.2,
@@ -1021,10 +1022,11 @@ def generate_and_compile(
                     "role": "user",
                     "content": f"ERRO DE COMPILAÇÃO:\n{result.error}\n\nCÓDIGO LATEX COM ERRO:\n{current_source}",
                 }],
-            )
-            fixed_body = _extract_latex_body(fix_response.content[0].text)
+            ) as fix_stream:
+                fix_text = fix_stream.get_final_text()
+            fixed_body = _extract_latex_body(fix_text)
             fixed_body = _sanitize_latex(fixed_body)
-            _log.info(f"[auto-fix] Claude returned fix ({len(fixed_body)} chars)")
+            _log.info(f"[auto-fix] doc_id={req.doc_id!r} Claude returned fix ({len(fixed_body)} chars)")
 
             preamble_end = current_source.find("\\begin{document}")
             if preamble_end != -1:
@@ -1032,17 +1034,83 @@ def generate_and_compile(
             else:
                 current_source = req.preamble + fixed_body
         except Exception as fix_err:
-            _log.error(f"[auto-fix] Claude call failed: {fix_err}")
+            _log.error(f"[auto-fix] doc_id={req.doc_id!r} Claude call failed: {fix_err}")
             last_error = f"Auto-fix failed: {str(fix_err)}"
             break
 
-    _log.warning(f"[generate] All {MAX_ATTEMPTS} attempts failed")
-    return GenerateAndCompileResponse(
-        success=False,
-        latex_source=current_source,
-        error=last_error,
-        attempts=MAX_ATTEMPTS,
-        ai_model=ai_model,
+    _log.warning(f"[generate] doc_id={req.doc_id!r} All {MAX_ATTEMPTS} attempts failed")
+    return {
+        "success": False,
+        "latex_source": current_source,
+        "error": last_error,
+        "attempts": MAX_ATTEMPTS,
+        "ai_model": ai_model,
+    }
+
+
+def _send_callback(callback_url: str, callback_token: str, result: dict) -> None:
+    """POST result dict to callback_url with Bearer auth token."""
+    try:
+        payload = json_lib.dumps(result).encode("utf-8")
+        http_req = urllib.request.Request(
+            callback_url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {callback_token}",
+                # Cloudflare blocks Python-urllib (error 1010 bot protection)
+                "User-Agent": "AEE-Pro-Compiler/1.0",
+            },
+            method="POST",
+        )
+        urllib.request.urlopen(http_req, timeout=30)
+        _log.info(f"[callback] Sent to {callback_url}")
+    except Exception as e:
+        _log.error(f"[callback] Failed to send to {callback_url}: {e}")
+
+
+def _process_and_callback(req: GenerateAndCompileRequest) -> None:
+    """Background task: generate+compile then call webhook."""
+    result = _do_generate_and_compile(req)
+    if req.callback_url:
+        _send_callback(req.callback_url, req.callback_token, result)
+
+
+@app.post("/generate-and-compile")
+def generate_and_compile(
+    req: GenerateAndCompileRequest,
+    background_tasks: BackgroundTasks,
+    authorization: str = Header(default=""),
+):
+    """Generate LaTeX with Claude, compile locally, auto-fix iteratively.
+
+    If callback_url is set: returns 202 immediately and processes in background,
+    POSTing the result to callback_url when done.
+    Otherwise: processes synchronously and returns the result directly.
+    """
+    if AUTH_TOKEN:
+        token = authorization.removeprefix("Bearer ").strip()
+        if token != AUTH_TOKEN:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+
+    if req.callback_url:
+        # Async mode: acknowledge immediately, process in background thread
+        background_tasks.add_task(_process_and_callback, req)
+        return Response(
+            content=json_lib.dumps({"status": "accepted", "doc_id": req.doc_id}),
+            status_code=202,
+            media_type="application/json",
+        )
+
+    # Sync mode (backward compat / local dev): process and return result
+    result = _do_generate_and_compile(req)
+    return Response(
+        content=json_lib.dumps(result),
+        status_code=200,
+        media_type="application/json",
     )
 
 

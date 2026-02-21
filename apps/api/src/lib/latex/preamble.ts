@@ -65,6 +65,10 @@ export function getLatexPreamble(options: PreambleOptions): string {
 \\definecolor{lightred}{HTML}{FFEBEE}
 \\definecolor{lightyellow}{HTML}{FFFDE7}
 
+% --- Math symbols ---
+\\usepackage{amssymb}
+\\usepackage{amsmath}
+
 % --- Graphics & Tables ---
 \\usepackage[draft]{graphicx}  % draft mode: ignore missing images
 \\usepackage{tikz}

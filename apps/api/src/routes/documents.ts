@@ -17,6 +17,8 @@ import type { Env } from "../index";
 
 /** AI generation timeout — 2 minutes */
 const AI_TIMEOUT_MS = 2 * 60 * 1000;
+/** Default max output tokens when not configured by user */
+const DEFAULT_MAX_OUTPUT_TOKENS = 8000;
 /** Max age for "generating" status before marking as stale (5 minutes) */
 const STALE_GENERATING_MS = 5 * 60 * 1000;
 
@@ -153,14 +155,14 @@ documentRoutes.post("/generate", async (c) => {
         messages: [
           {
             role: "system",
-            content: `Você é um professor especialista em Atendimento Educacional Especializado (AEE). Gere documentos profissionais, claros e funcionais em português brasileiro. A data de hoje é ${new Date().toLocaleDateString("pt-BR")}.`,
+            content: `Você é um professor especialista em Atendimento Educacional Especializado (AEE). Gere documentos profissionais, claros e funcionais em português brasileiro. A data de hoje é ${new Date().toLocaleDateString("pt-BR")}. IMPORTANTE: retorne APENAS o conteúdo do documento, sem introduções, confirmações, comentários ou qualquer texto fora do documento em si.`,
           },
           {
             role: "user",
             content: renderedPrompt,
           },
         ],
-        maxTokens: 2000,
+        maxTokens: settings.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         temperature: 0.7,
       }),
       AI_TIMEOUT_MS,
@@ -172,7 +174,7 @@ documentRoutes.post("/generate", async (c) => {
     await db
       .update(documents)
       .set({
-        content: result.content,
+        content: stripAIPreamble(result.content),
         status: "completed",
         generatedAt,
         updatedAt: generatedAt,
@@ -428,11 +430,11 @@ documentRoutes.post("/:id/regenerate", async (c) => {
         messages: [
           {
             role: "system",
-            content: `Você é um professor especialista em Atendimento Educacional Especializado (AEE). Gere documentos profissionais, claros e funcionais em português brasileiro. A data de hoje é ${new Date().toLocaleDateString("pt-BR")}.`,
+            content: `Você é um professor especialista em Atendimento Educacional Especializado (AEE). Gere documentos profissionais, claros e funcionais em português brasileiro. A data de hoje é ${new Date().toLocaleDateString("pt-BR")}. IMPORTANTE: retorne APENAS o conteúdo do documento, sem introduções, confirmações, comentários ou qualquer texto fora do documento em si.`,
           },
           { role: "user", content: renderedPrompt },
         ],
-        maxTokens: 2000,
+        maxTokens: settings.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         temperature: 0.7,
       }),
       AI_TIMEOUT_MS,
@@ -442,7 +444,7 @@ documentRoutes.post("/:id/regenerate", async (c) => {
     const generatedAt = new Date().toISOString();
     await db
       .update(documents)
-      .set({ content: result.content, status: "completed", generatedAt, updatedAt: generatedAt })
+      .set({ content: stripAIPreamble(result.content), status: "completed", generatedAt, updatedAt: generatedAt })
       .where(eq(documents.id, newDocId));
 
     const newDoc = await db.select().from(documents).where(eq(documents.id, newDocId)).get();
@@ -517,7 +519,7 @@ documentRoutes.post("/:id/edit-ai", async (c) => {
             content: `<instrucao>${body.instruction}</instrucao>\n\n<documento>\n${doc.content}\n</documento>`,
           },
         ],
-        maxTokens: 2000,
+        maxTokens: settings.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         temperature: 0.7,
       }),
       AI_TIMEOUT_MS,
@@ -937,10 +939,35 @@ function escapeAndBold(text: string): string {
     .join("");
 }
 
+/**
+ * Strip conversational preamble that AI models sometimes add before the actual document.
+ * E.g.: "Com certeza. Como especialista..." followed by *** separator.
+ * Looks for a separator line (*** or ---) or the first heading line.
+ */
+function stripAIPreamble(content: string): string {
+  // Try: separator line (*** or ---) before first heading
+  const sepMatch = content.match(/^[*\-]{3,}\s*$/m);
+  if (sepMatch?.index !== undefined) {
+    const after = content.substring(sepMatch.index + sepMatch[0].length).trimStart();
+    if (after.length > 80) return after;
+  }
+
+  // Try: remove lines before the first real heading or bold title
+  const headingMatch = content.match(/^(#{1,3}\s+|\*\*[A-ZÁÉÍÓÚÃÕÇ])/m);
+  if (headingMatch?.index !== undefined && headingMatch.index > 30) {
+    const before = content.substring(0, headingMatch.index);
+    if (/com certeza|claro|aqui está|abaixo|vou elaborar|baseado|com base|segue/i.test(before)) {
+      return content.substring(headingMatch.index).trimStart();
+    }
+  }
+
+  return content;
+}
+
 function getDefaultModel(provider: string): string {
   switch (provider) {
     case "openai": return "gpt-4.1-mini";
-    case "anthropic": return "claude-sonnet-4-5-20250929";
+    case "anthropic": return "claude-sonnet-4-6";
     case "gemini": return "gemini-2.0-flash";
     case "groq": return "llama-3.3-70b-versatile";
     case "deepseek": return "deepseek-chat";

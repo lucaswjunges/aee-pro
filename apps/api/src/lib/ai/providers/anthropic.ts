@@ -18,6 +18,7 @@ export class AnthropicProvider implements AIProvider {
       max_tokens: options.maxTokens ?? 2000,
       temperature: options.temperature ?? 0.7,
       messages: userMessages,
+      stream: true, // Always stream — Anthropic requires it for long requests
     };
 
     if (systemMsg) {
@@ -39,23 +40,56 @@ export class AnthropicProvider implements AIProvider {
       throw new Error(`Anthropic API error (${res.status}): ${err}`);
     }
 
-    const data = await res.json() as {
-      content: { type: string; text: string }[];
-      model: string;
-      usage?: { input_tokens: number; output_tokens: number };
-    };
+    // Parse SSE streaming response
+    let text = "";
+    let outputModel = options.model;
+    let inputTokens = 0;
+    let outputTokens = 0;
 
-    const text = data.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("");
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") break;
+        try {
+          const event = JSON.parse(data) as Record<string, unknown>;
+          if (event.type === "message_start" && event.message) {
+            const msg = event.message as Record<string, unknown>;
+            if (msg.model) outputModel = msg.model as string;
+            if (msg.usage) {
+              inputTokens = (msg.usage as Record<string, number>).input_tokens ?? 0;
+            }
+          } else if (event.type === "content_block_delta") {
+            const delta = event.delta as Record<string, unknown>;
+            if (delta?.type === "text_delta" && typeof delta.text === "string") {
+              text += delta.text;
+            }
+          } else if (event.type === "message_delta") {
+            outputTokens = ((event.usage as Record<string, number>) ?? {}).output_tokens ?? 0;
+          }
+        } catch {
+          // ignore malformed SSE lines
+        }
+      }
+    }
 
     return {
       content: text,
-      model: data.model,
-      usage: data.usage
-        ? { inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens }
-        : undefined,
+      model: outputModel,
+      usage:
+        inputTokens > 0 || outputTokens > 0
+          ? { inputTokens, outputTokens }
+          : undefined,
     };
   }
 }

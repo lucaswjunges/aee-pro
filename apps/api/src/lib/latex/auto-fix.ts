@@ -4,8 +4,8 @@ import { sanitizeLatexSource, detectTruncation } from "./sanitizer";
 
 const MAX_FIX_ATTEMPTS = 3;
 const MAX_REFINE_PASSES = 3;
-/** Global timeout for the entire auto-fix pipeline (3 minutes). */
-const PIPELINE_TIMEOUT_MS = 3 * 60 * 1000;
+/** Global timeout for the entire auto-fix pipeline (2 minutes). */
+const PIPELINE_TIMEOUT_MS = 2 * 60 * 1000;
 
 const AUTOFIX_SYSTEM_PROMPT = `Você é um especialista em LaTeX. O código abaixo falhou na compilação com pdflatex.
 

@@ -35,7 +35,10 @@ export function LatexGenerateDialog({
     setSubmitting(true);
     setError(null);
 
-    const res = await api.post<LatexDocument>("/latex-documents/generate", {
+    // Fire the request — the API processes synchronously but we don't need to wait.
+    // Close the dialog after a short delay so the user sees "Gerando..." feedback,
+    // then the document list will show the new doc with its status.
+    const requestPromise = api.post<LatexDocument>("/latex-documents/generate", {
       studentId,
       documentType,
       heatLevel,
@@ -44,13 +47,21 @@ export function LatexGenerateDialog({
       unlimitedTokens,
     });
 
-    setSubmitting(false);
-
-    if (res.success) {
+    // Close dialog after 2s and refresh list — don't wait for the full response
+    setTimeout(() => {
       onGenerated();
       handleClose();
-    } else {
+    }, 2000);
+
+    // Still handle errors if the request fails quickly
+    const res = await requestPromise;
+    if (!res.success) {
+      // Only show error if dialog is still open (within the 2s window)
+      setSubmitting(false);
       setError(res.error ?? "Erro desconhecido");
+    } else {
+      // Request completed — refresh list again to get final status
+      onGenerated();
     }
   };
 
@@ -143,7 +154,7 @@ export function LatexGenerateDialog({
             Cancelar
           </Button>
           <Button size="sm" onClick={handleGenerate} disabled={submitting}>
-            Gerar Documento
+            {submitting ? "Gerando..." : "Gerar Documento"}
           </Button>
         </div>
       </div>

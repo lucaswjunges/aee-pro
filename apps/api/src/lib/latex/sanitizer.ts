@@ -60,6 +60,13 @@ export function detectTruncation(source: string): string | null {
 export function sanitizeLatexSource(source: string): string {
   let result = source;
 
+  // Layer 0: Strip emoji and supplemental Unicode characters pdflatex cannot handle.
+  // pdflatex only supports characters declared in utf8.def (Latin-1 + some extensions).
+  // Emoji (U+1F000+) and Misc Symbols (U+2600–U+27BF) cause fatal
+  // "Unicode character not set up for use with LaTeX" errors.
+  // eslint-disable-next-line no-control-regex
+  result = result.replace(/[\u2600-\u27BF\u{1F000}-\u{10FFFF}]/gu, "");
+
   // Layer 1: Remove entire \foreach blocks that use rnd (randomness).
   // These are always decorative TikZ elements that cause compilation
   // errors due to randomness + conditionals + inline math.
@@ -1421,39 +1428,49 @@ function fixTabularxWithoutXColumns(source: string): string {
 }
 
 /**
- * Layer 21: Fix \rowcolor placed inside table cells (after &).
+ * Layer 21: Fix \rowcolor — causes "Misplaced \noalign" fatal error inside tabularx.
  *
- * \rowcolor uses \noalign internally and MUST appear at the very start of a row,
- * before any &. When AI writes:
- *   Text & \rowcolor{green} Text2 & \rowcolor{red} Text3 \\
- * it causes "Misplaced \noalign" fatal error.
+ * \rowcolor uses \noalign internally. In tabularx, the table body is processed
+ * multiple times to calculate column widths, which breaks \noalign completely.
+ * Even correctly-placed \rowcolor at the start of a row will crash inside tabularx.
  *
- * Fix: convert \rowcolor{...} that appears after & to \cellcolor{...},
- * which is the per-cell equivalent and doesn't use \noalign.
+ * Fix: replace ALL \rowcolor{color} with per-cell \cellcolor{color} applied to
+ * each cell in the row, OR simply strip \rowcolor if it's too complex to convert.
  */
 function fixMisplacedRowcolor(source: string): string {
   const lines = source.split("\n");
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // Only process lines that have both & and \rowcolor
-    if (!line.includes("&") || !line.includes("\\rowcolor")) continue;
+    if (!line.includes("\\rowcolor")) continue;
 
-    // Split by & to find cells
-    const cells = line.split("&");
-    let changed = false;
+    // Extract the color from \rowcolor{...} or \rowcolor[model]{...}
+    const match = line.match(/\\rowcolor(?:\[[^\]]*\])?\{([^}]+)\}/);
+    const color = match ? match[1] : null;
 
-    for (let c = 1; c < cells.length; c++) {
-      // In cells after the first one, \rowcolor is misplaced
-      if (cells[c].includes("\\rowcolor")) {
-        cells[c] = cells[c].replace(/\\rowcolor/g, "\\cellcolor");
-        changed = true;
+    // Remove the \rowcolor command from the line
+    let cleaned = line.replace(/\\rowcolor(?:\[[^\]]*\])?\{[^}]*\}\s*/g, "");
+
+    // If the line has & (table row), add \cellcolor to each cell
+    if (color && cleaned.includes("&")) {
+      const cells = cleaned.split("&");
+      cleaned = cells
+        .map((cell) => {
+          const trimmed = cell.trimStart();
+          // Don't add cellcolor to empty cells or cells that already have it
+          if (!trimmed || trimmed === "\\\\" || cell.includes("\\cellcolor")) return cell;
+          return cell.replace(trimmed, `\\cellcolor{${color}}${trimmed}`);
+        })
+        .join("&");
+    } else if (color && !cleaned.includes("&")) {
+      // Single-column or standalone: just prepend cellcolor
+      const trimmed = cleaned.trimStart();
+      if (trimmed && trimmed !== "\\\\") {
+        cleaned = cleaned.replace(trimmed, `\\cellcolor{${color}}${trimmed}`);
       }
     }
 
-    if (changed) {
-      lines[i] = cells.join("&");
-    }
+    lines[i] = cleaned;
   }
 
   return lines.join("\n");

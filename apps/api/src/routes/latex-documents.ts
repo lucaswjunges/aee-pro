@@ -9,15 +9,16 @@ import { getLatexPreamble } from "../lib/latex/preamble";
 import { buildLatexPrompt, buildSignatureBlock } from "../lib/latex/prompt-builder";
 import { getLatexModel, normalizeModelForProvider } from "../lib/latex/model-selection";
 import { getDocumentTypeConfig } from "../lib/latex/document-types";
-import { compileLatex, generateAndCompile, type CompileImage } from "../lib/latex/compiler-client";
+import { compileLatex } from "../lib/latex/compiler-client";
 import { compileWithAutoFix, filterDisplayWarnings } from "../lib/latex/auto-fix";
 import { sanitizeLatexSource } from "../lib/latex/sanitizer";
 import { resolveImagesFromLatex } from "../lib/latex/image-resolver";
 import { LATEX_DOCUMENT_TYPES, SIZE_LEVELS } from "@aee-pro/shared";
 import type { Env } from "../index";
 
-/** Max age for "generating"/"compiling" status before marking as stale (5 minutes) */
-const STALE_GENERATING_MS = 5 * 60 * 1000;
+/** Max age for "generating"/"compiling" status before marking as stale (20 minutes).
+ * generateAndCompile timeout is 10 min; compilation pipeline up to 2 min. */
+const STALE_GENERATING_MS = 20 * 60 * 1000;
 
 type LatexEnv = Env & {
   Variables: {
@@ -26,6 +27,81 @@ type LatexEnv = Env & {
 };
 
 export const latexDocumentRoutes = new Hono<LatexEnv>();
+
+// ---------- POST /webhook/result/:docId ----------
+// Called by Fly.io when async generation+compilation is done.
+// No session auth — uses LATEX_COMPILER_TOKEN as shared secret.
+
+latexDocumentRoutes.post("/webhook/result/:docId", async (c) => {
+  const token = c.req.header("authorization")?.replace("Bearer ", "").trim() ?? "";
+  if (!c.env.LATEX_COMPILER_TOKEN || token !== c.env.LATEX_COMPILER_TOKEN) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const docId = c.req.param("docId");
+  const db = createDb(c.env.DB);
+
+  const doc = await db
+    .select()
+    .from(latexDocuments)
+    .where(eq(latexDocuments.id, docId))
+    .get();
+
+  if (!doc) {
+    console.error(`[webhook] doc not found: ${docId}`);
+    return c.json({ error: "Document not found" }, 404);
+  }
+
+  const result = (await c.req.json()) as {
+    success: boolean;
+    pdf_base64?: string;
+    pdf_size_bytes?: number;
+    latex_source?: string;
+    error?: string;
+    warnings?: string[];
+    attempts?: number;
+    ai_model?: string;
+  };
+
+  console.log(`[webhook] doc=${docId} success=${result.success} attempts=${result.attempts}`);
+
+  if (result.success && result.pdf_base64) {
+    const r2Key = `latex-pdfs/${doc.userId}/${docId}.pdf`;
+    const pdfBuffer = Uint8Array.from(atob(result.pdf_base64), (ch) => ch.charCodeAt(0));
+    await c.env.R2.put(r2Key, pdfBuffer, {
+      httpMetadata: { contentType: "application/pdf" },
+    });
+
+    await db
+      .update(latexDocuments)
+      .set({
+        latexSource: result.latex_source ?? doc.latexSource,
+        pdfR2Key: r2Key,
+        pdfSizeBytes: result.pdf_size_bytes ?? pdfBuffer.length,
+        status: "completed",
+        aiModel: result.ai_model ?? doc.aiModel,
+        compilationAttempts: result.attempts ?? 1,
+        compilationWarnings: JSON.stringify(filterDisplayWarnings(result.warnings ?? [])),
+        lastCompilationError: null,
+        generatedAt: doc.generatedAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(latexDocuments.id, docId));
+  } else {
+    await db
+      .update(latexDocuments)
+      .set({
+        latexSource: result.latex_source ?? doc.latexSource,
+        status: "compile_error",
+        compilationAttempts: result.attempts ?? 0,
+        lastCompilationError: result.error ?? "Erro desconhecido na geração",
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(latexDocuments.id, docId));
+  }
+
+  return c.json({ success: true });
+});
 
 latexDocumentRoutes.use("*", authMiddleware);
 
@@ -205,173 +281,81 @@ latexDocumentRoutes.post("/generate", async (c) => {
     updatedAt: now,
   });
 
-  // Return immediately — process AI generation in background
+  // Return immediately — process AI generation in background via waitUntil.
+  // The frontend polls for status and shows progress until the doc completes.
   const newDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, docId)).get();
   const aiProvider = settings.aiProvider!;
 
-  // Process synchronously — waitUntil is unreliable on Workers free tier.
-  // The frontend polls for status, so it doesn't matter if this takes time.
-  // Workers allow unlimited I/O wait time; only CPU is limited to 10ms.
+  // Fire-and-forget: send job to Fly.io (webhook pattern).
+  // Worker waits only for 202 ACK (~5s). Fly.io processes async (Claude + pdflatex)
+  // and POSTs the result back to /webhook/result/:docId when done.
   const processGeneration = async () => {
     try {
-      console.log(`[generate] Starting for doc ${docId}, compiler: ${c.env.LATEX_COMPILER_URL}`);
+      if (!c.env.LATEX_COMPILER_URL) {
+        await db
+          .update(latexDocuments)
+          .set({ status: "error", lastCompilationError: "LATEX_COMPILER_URL não configurado.", updatedAt: new Date().toISOString() })
+          .where(eq(latexDocuments.id, docId));
+        return;
+      }
+
       const preamble = getLatexPreamble({
         documentTitle: typeName,
         studentName: student.name,
         schoolName: student.school ?? "Escola",
       });
-      const signatureBlock = buildSignatureBlock(body.documentType, student);
 
-      // --- Try local server (Claude API + pdflatex) first ---
-      console.log("[generate] Trying generateAndCompile...");
-      const localResult = await generateAndCompile(
-        {
-          systemPrompt: system,
-          userPrompt: user,
-          preamble,
-          maxTokens: effectiveMaxTokens,
-          signatureBlock,
-        },
-        c.env.LATEX_COMPILER_URL,
-        c.env.LATEX_COMPILER_TOKEN,
-      );
+      const signatureBlock = buildSignatureBlock(body.documentType, student as Parameters<typeof buildSignatureBlock>[1]);
 
-      if (localResult?.success && localResult.pdfBase64 && localResult.latexSource) {
-        console.log(`[generate] Local server succeeded (model: ${localResult.aiModel}, attempts: ${localResult.attempts})`);
-        const r2Key = `latex-pdfs/${userId}/${docId}.pdf`;
-        const pdfBuffer = Uint8Array.from(atob(localResult.pdfBase64), (ch) => ch.charCodeAt(0));
-        await c.env.R2.put(r2Key, pdfBuffer, {
-          httpMetadata: { contentType: "application/pdf" },
+      // Derive callback URL from the incoming request origin
+      const workerOrigin = new URL(c.req.url).origin;
+      const callbackUrl = `${workerOrigin}/api/latex-documents/webhook/result/${docId}`;
+
+      console.log(`[generate] Dispatching to Fly.io, callback=${callbackUrl}`);
+
+      // Send job to Fly.io — wait only for 202 ACK (max 30s)
+      let flyRes: Response;
+      try {
+        flyRes = await fetch(`${c.env.LATEX_COMPILER_URL}/generate-and-compile`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${c.env.LATEX_COMPILER_TOKEN}`,
+          },
+          body: JSON.stringify({
+            system_prompt: system,
+            user_prompt: user,
+            preamble,
+            max_tokens: effectiveMaxTokens,
+            signature_block: signatureBlock || undefined,
+            doc_id: docId,
+            callback_url: callbackUrl,
+            callback_token: c.env.LATEX_COMPILER_TOKEN,
+          }),
+          signal: AbortSignal.timeout(30_000),
         });
-
+      } catch (fetchErr) {
+        const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        console.error(`[generate] Failed to reach Fly.io: ${errMsg}`);
         await db
           .update(latexDocuments)
-          .set({
-            latexSource: localResult.latexSource,
-            pdfR2Key: r2Key,
-            pdfSizeBytes: localResult.pdfSizeBytes ?? pdfBuffer.length,
-            status: "completed",
-            compilationAttempts: localResult.attempts,
-            compilationWarnings: JSON.stringify(filterDisplayWarnings(localResult.warnings ?? [])),
-            lastCompilationError: null,
-            aiModel: localResult.aiModel ?? model,
-            generatedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
+          .set({ status: "error", lastCompilationError: `Servidor de compilação indisponível: ${errMsg}`, updatedAt: new Date().toISOString() })
           .where(eq(latexDocuments.id, docId));
         return;
       }
 
-      // If local server generated LaTeX but compilation failed, use that LaTeX
-      let fullLatex: string | null = null;
-
-      if (localResult && !localResult.success && localResult.latexSource) {
-        console.log(`[generate] Local Claude generated LaTeX but compilation failed: ${localResult.error?.slice(0, 100)}, trying auto-fix...`);
-        fullLatex = localResult.latexSource;
+      if (!flyRes.ok) {
+        const text = await flyRes.text().catch(() => "");
+        console.error(`[generate] Fly.io responded ${flyRes.status}: ${text.slice(0, 200)}`);
         await db
           .update(latexDocuments)
-          .set({
-            latexSource: fullLatex,
-            status: "compiling",
-            aiModel: localResult.aiModel ?? model,
-            generatedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
+          .set({ status: "error", lastCompilationError: `Compilador retornou ${flyRes.status}`, updatedAt: new Date().toISOString() })
           .where(eq(latexDocuments.id, docId));
-      } else {
-        if (localResult) {
-          console.log(`[generate] Local server error: ${localResult.error}, falling back`);
-        } else {
-          console.log("[generate] Local server unavailable, falling back to Worker AI");
-        }
-
-        // --- Fallback: generate with Worker AI provider ---
-        console.log(`[generate] Using ${aiProvider}/${model} via Worker AI`);
-        const provider = createAIProvider(aiProvider, apiKey);
-        const result = await provider.generate({
-          model,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-          maxTokens: effectiveMaxTokens,
-          temperature: 0.7,
-        });
-
-        let body_latex = extractLatexBody(result.content);
-
-        const qualityError = checkContentQuality(body_latex);
-        if (qualityError) {
-          await db
-            .update(latexDocuments)
-            .set({ status: "error", lastCompilationError: qualityError, updatedAt: new Date().toISOString() })
-            .where(eq(latexDocuments.id, docId));
-          return;
-        }
-
-        body_latex = injectSignatureBlock(body_latex, body.documentType, student);
-        fullLatex = preamble + body_latex;
-
-        await db
-          .update(latexDocuments)
-          .set({
-            latexSource: fullLatex,
-            status: "compiling",
-            generatedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(latexDocuments.id, docId));
+        return;
       }
 
-      // Compile with auto-fix
-      console.log("[generate] Starting compilation with auto-fix...");
-      const images = await resolveImagesFromLatex(fullLatex!, userId, db, c.env.R2);
-      const provider = createAIProvider(aiProvider, apiKey);
-      const compileResult = await compileWithAutoFix(
-        fullLatex!,
-        c.env.LATEX_COMPILER_URL,
-        c.env.LATEX_COMPILER_TOKEN,
-        provider,
-        model,
-        effectiveMaxTokens,
-        images.length > 0 ? images : undefined,
-      );
-
-      if (compileResult.success && compileResult.pdfBase64) {
-        console.log(`[generate] Compilation succeeded after ${compileResult.attempts} attempts`);
-        const r2Key = `latex-pdfs/${userId}/${docId}.pdf`;
-        const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
-        await c.env.R2.put(r2Key, pdfBuffer, {
-          httpMetadata: { contentType: "application/pdf" },
-        });
-
-        await db
-          .update(latexDocuments)
-          .set({
-            latexSource: compileResult.latexSource,
-            pdfR2Key: r2Key,
-            pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
-            status: "completed",
-            compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
-            lastCompilationError: null,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(latexDocuments.id, docId));
-      } else {
-        console.log(`[generate] Compilation failed: ${compileResult.lastError?.slice(0, 200)}`);
-        await db
-          .update(latexDocuments)
-          .set({
-            latexSource: compileResult.latexSource,
-            status: "compile_error",
-            compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
-            lastCompilationError: compileResult.lastError ?? "Unknown compilation error",
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(latexDocuments.id, docId));
-      }
+      console.log(`[generate] Fly.io accepted job for doc ${docId} (status=${flyRes.status})`);
+      // Fly.io returns 202 — it will POST to callbackUrl when done
     } catch (err) {
       console.error(`[generate] Fatal error for doc ${docId}:`, err);
       const errorMsg = err instanceof Error ? err.message : "Erro desconhecido na geração";
@@ -379,14 +363,13 @@ latexDocumentRoutes.post("/generate", async (c) => {
         .update(latexDocuments)
         .set({ status: "error", lastCompilationError: errorMsg, updatedAt: new Date().toISOString() })
         .where(eq(latexDocuments.id, docId))
-        .catch(() => {}); // Don't let DB error mask the original error
+        .catch(() => {});
     }
   };
 
-  // Run synchronously — waitUntil is unreliable on Workers free tier
-  await processGeneration();
-  const finalDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, docId)).get();
-  return c.json({ success: true, data: finalDoc }, 201);
+  // waitUntil keeps Worker alive only for the short dispatch (~5-30s) — no long I/O.
+  c.executionCtx.waitUntil(processGeneration());
+  return c.json({ success: true, data: newDoc }, 201);
 });
 
 // ---------- GET / ----------
@@ -746,10 +729,8 @@ latexDocumentRoutes.post("/:id/recompile", async (c) => {
     }
   };
 
-  // Run synchronously — waitUntil is unreliable on Workers free tier
-  await processRecompile();
-  const finalDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, id)).get();
-  return c.json({ success: true, data: finalDoc });
+  c.executionCtx.waitUntil(processRecompile());
+  return c.json({ success: true, data: updated });
 });
 
 // ---------- POST /:id/edit-ai ----------
@@ -928,10 +909,8 @@ latexDocumentRoutes.post("/:id/edit-ai", async (c) => {
     }
   })();
 
-  // Run synchronously — waitUntil is unreliable on Workers free tier
-  await bgWork;
-  const finalDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, id)).get();
-  return c.json({ success: true, data: finalDoc });
+  c.executionCtx.waitUntil(bgWork);
+  return c.json({ success: true, data: updated });
 });
 
 // ---------- PUT /:id ----------
@@ -1082,158 +1061,73 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
   const newDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, newDocId)).get();
   const regenAiProvider = settings.aiProvider!;
 
+  const regenMaxTokens = getMaxTokens(sizeLevel);
+
+  // Fire-and-forget: dispatch to Fly.io webhook pattern (same as /generate)
   const processRegenerate = async () => {
     try {
-      console.log(`[regenerate] Starting for doc ${newDocId}, compiler: ${c.env.LATEX_COMPILER_URL}`);
+      if (!c.env.LATEX_COMPILER_URL) {
+        await db
+          .update(latexDocuments)
+          .set({ status: "error", lastCompilationError: "LATEX_COMPILER_URL não configurado.", updatedAt: new Date().toISOString() })
+          .where(eq(latexDocuments.id, newDocId));
+        return;
+      }
+
       const preamble = getLatexPreamble({
         documentTitle: typeName,
         studentName: student.name,
         schoolName: student.school ?? "Escola",
       });
-      const signatureBlock = buildSignatureBlock(doc.documentType, student);
-      const regenMaxTokens = getMaxTokens(sizeLevel);
 
-      console.log("[regenerate] Trying generateAndCompile...");
-      const localResult = await generateAndCompile(
-        {
-          systemPrompt: system,
-          userPrompt: user,
-          preamble,
-          maxTokens: regenMaxTokens,
-          signatureBlock,
-        },
-        c.env.LATEX_COMPILER_URL,
-        c.env.LATEX_COMPILER_TOKEN,
-      );
+      const signatureBlock = buildSignatureBlock(doc.documentType, student as Parameters<typeof buildSignatureBlock>[1]);
 
-      if (localResult?.success && localResult.pdfBase64 && localResult.latexSource) {
-        console.log(`[regenerate] Local server succeeded (model: ${localResult.aiModel})`);
-        const r2Key = `latex-pdfs/${userId}/${newDocId}.pdf`;
-        const pdfBuffer = Uint8Array.from(atob(localResult.pdfBase64), (ch) => ch.charCodeAt(0));
-        await c.env.R2.put(r2Key, pdfBuffer, {
-          httpMetadata: { contentType: "application/pdf" },
+      const workerOrigin = new URL(c.req.url).origin;
+      const callbackUrl = `${workerOrigin}/api/latex-documents/webhook/result/${newDocId}`;
+
+      console.log(`[regenerate] Dispatching to Fly.io, callback=${callbackUrl}`);
+
+      let flyRes: Response;
+      try {
+        flyRes = await fetch(`${c.env.LATEX_COMPILER_URL}/generate-and-compile`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${c.env.LATEX_COMPILER_TOKEN}`,
+          },
+          body: JSON.stringify({
+            system_prompt: system,
+            user_prompt: user,
+            preamble,
+            max_tokens: regenMaxTokens,
+            signature_block: signatureBlock || undefined,
+            doc_id: newDocId,
+            callback_url: callbackUrl,
+            callback_token: c.env.LATEX_COMPILER_TOKEN,
+          }),
+          signal: AbortSignal.timeout(30_000),
         });
-
+      } catch (fetchErr) {
+        const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        console.error(`[regenerate] Failed to reach Fly.io: ${errMsg}`);
         await db
           .update(latexDocuments)
-          .set({
-            latexSource: localResult.latexSource,
-            pdfR2Key: r2Key,
-            pdfSizeBytes: localResult.pdfSizeBytes ?? pdfBuffer.length,
-            status: "completed",
-            compilationAttempts: localResult.attempts,
-            compilationWarnings: JSON.stringify(filterDisplayWarnings(localResult.warnings ?? [])),
-            lastCompilationError: null,
-            aiModel: localResult.aiModel ?? model,
-            generatedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
+          .set({ status: "error", lastCompilationError: `Servidor de compilação indisponível: ${errMsg}`, updatedAt: new Date().toISOString() })
           .where(eq(latexDocuments.id, newDocId));
         return;
       }
 
-      let fullLatex: string | null = null;
-
-      if (localResult && !localResult.success && localResult.latexSource) {
-        console.log(`[regenerate] Local Claude generated LaTeX but compilation failed, trying auto-fix...`);
-        fullLatex = localResult.latexSource;
+      if (!flyRes.ok) {
+        const text = await flyRes.text().catch(() => "");
+        console.error(`[regenerate] Fly.io responded ${flyRes.status}: ${text.slice(0, 200)}`);
         await db
           .update(latexDocuments)
-          .set({
-            latexSource: fullLatex,
-            status: "compiling",
-            aiModel: localResult.aiModel ?? model,
-            generatedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
+          .set({ status: "error", lastCompilationError: `Compilador retornou ${flyRes.status}`, updatedAt: new Date().toISOString() })
           .where(eq(latexDocuments.id, newDocId));
-      } else {
-        console.log(`[regenerate] ${localResult ? `Local error: ${localResult.error}` : "Local unavailable"}, falling back to ${regenAiProvider}/${model}`);
-
-        const fallbackProvider = createAIProvider(regenAiProvider, apiKey);
-        const result = await fallbackProvider.generate({
-          model,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-          maxTokens: regenMaxTokens,
-          temperature: 0.7,
-        });
-
-        let bodyLatex = extractLatexBody(result.content);
-
-        const qualityError = checkContentQuality(bodyLatex);
-        if (qualityError) {
-          await db
-            .update(latexDocuments)
-            .set({ status: "error", lastCompilationError: qualityError, updatedAt: new Date().toISOString() })
-            .where(eq(latexDocuments.id, newDocId));
-          return;
-        }
-
-        bodyLatex = injectSignatureBlock(bodyLatex, doc.documentType, student);
-        fullLatex = preamble + bodyLatex;
-
-        await db
-          .update(latexDocuments)
-          .set({
-            latexSource: fullLatex,
-            status: "compiling",
-            generatedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(latexDocuments.id, newDocId));
+        return;
       }
 
-      console.log("[regenerate] Starting compilation...");
-      const regenImages = await resolveImagesFromLatex(fullLatex!, userId, db, c.env.R2);
-      const provider = createAIProvider(regenAiProvider, apiKey);
-      const compileResult = await compileWithAutoFix(
-        fullLatex!,
-        c.env.LATEX_COMPILER_URL,
-        c.env.LATEX_COMPILER_TOKEN,
-        provider,
-        model,
-        regenMaxTokens,
-        regenImages.length > 0 ? regenImages : undefined,
-      );
-
-      if (compileResult.success && compileResult.pdfBase64) {
-        console.log(`[regenerate] Compilation succeeded after ${compileResult.attempts} attempts`);
-        const r2Key = `latex-pdfs/${userId}/${newDocId}.pdf`;
-        const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
-        await c.env.R2.put(r2Key, pdfBuffer, {
-          httpMetadata: { contentType: "application/pdf" },
-        });
-
-        await db
-          .update(latexDocuments)
-          .set({
-            latexSource: compileResult.latexSource,
-            pdfR2Key: r2Key,
-            pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
-            status: "completed",
-            compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
-            lastCompilationError: null,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(latexDocuments.id, newDocId));
-      } else {
-        console.log(`[regenerate] Compilation failed: ${compileResult.lastError?.slice(0, 200)}`);
-        await db
-          .update(latexDocuments)
-          .set({
-            latexSource: compileResult.latexSource,
-            status: "compile_error",
-            compilationAttempts: compileResult.attempts,
-            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
-            lastCompilationError: compileResult.lastError ?? "Unknown compilation error",
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(latexDocuments.id, newDocId));
-      }
+      console.log(`[regenerate] Fly.io accepted job for doc ${newDocId} (status=${flyRes.status})`);
     } catch (err) {
       console.error(`[regenerate] Fatal error for doc ${newDocId}:`, err);
       const errorMsg = err instanceof Error ? err.message : "Erro desconhecido";
@@ -1245,8 +1139,6 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
     }
   };
 
-  // Run synchronously — waitUntil is unreliable on Workers free tier
-  await processRegenerate();
-  const finalDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, newDocId)).get();
-  return c.json({ success: true, data: finalDoc }, 201);
+  c.executionCtx.waitUntil(processRegenerate());
+  return c.json({ success: true, data: newDoc }, 201);
 });
