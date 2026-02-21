@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+[triggers]
+crons = ["*/10 * * * *"]
+
 # Production D1 database — create with:
 #   wrangler d1 create aee-pro-db
 # Then paste the database_id below

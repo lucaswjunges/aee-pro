@@ -33,13 +33,26 @@ class ApiClient {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const res = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      headers,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20_000);
 
-    const json = await res.json();
-    return json;
+    try {
+      const res = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      const json = await res.json();
+      return json;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return { success: false, error: "Tempo limite excedido. O servidor pode estar iniciando — tente novamente em alguns segundos." };
+      }
+      return { success: false, error: "Erro de conexão. Verifique sua internet e tente novamente." };
+    }
   }
 
   async get<T>(path: string) {

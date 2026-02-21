@@ -43,4 +43,10 @@ app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/latex-documents", latexDocumentRoutes);
 app.route("/api/images", imageRoutes);
 
-export default app;
+export default {
+  fetch: app.fetch.bind(app),
+  // Cron trigger every 10 min keeps the Worker warm — prevents cold-start delays
+  scheduled(_event: ScheduledEvent, _env: Env, _ctx: ExecutionContext) {
+    // No-op: Cloudflare instantiates the Worker, preventing cold starts
+  },
+};
