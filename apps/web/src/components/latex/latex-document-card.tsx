@@ -30,12 +30,14 @@ export function LatexDocumentCard({
   regenerating,
 }: LatexDocumentCardProps) {
   const status = statusConfig[document.status] ?? statusConfig.error;
-  const isBusy = regenerating || document.status === "generating" || document.status === "compiling";
+  const isProcessing = document.status === "generating" || document.status === "compiling";
+  const isBusy = regenerating || isProcessing;
   const heatName = HEAT_LEVELS.find((h) => h.level === document.heatLevel)?.name ?? `${document.heatLevel}`;
   const sizeName = SIZE_LEVELS.find((s) => s.level === document.sizeLevel)?.name ?? `${document.sizeLevel}`;
-
-  const formattedDate = document.generatedAt
-    ? new Date(document.generatedAt).toLocaleDateString("pt-BR", {
+  const dateSource = isProcessing ? document.createdAt : document.generatedAt;
+  const dateLabel = isProcessing ? "Iniciado em " : "";
+  const formattedDate = dateSource
+    ? dateLabel + new Date(dateSource).toLocaleDateString("pt-BR", {
         day: "2-digit",
         month: "2-digit",
         year: "numeric",
