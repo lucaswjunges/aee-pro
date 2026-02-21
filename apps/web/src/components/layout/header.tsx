@@ -26,7 +26,7 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full bg-primary text-primary-foreground shadow-md">
+    <header className="fixed top-0 left-0 right-0 z-50 w-full bg-primary text-primary-foreground shadow-md">
       <div className="flex h-14 items-center px-4 gap-4">
         <Link to="/" className="flex items-center gap-2">
           <img src="/logo.png" alt="AEE+ PRO" className="h-14 rounded" />
