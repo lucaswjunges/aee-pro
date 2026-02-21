@@ -11,6 +11,8 @@ const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "mistral-large-latest": "mistralai/mistral-large",
   "mistral-medium-latest": "mistralai/mistral-medium",
   "mistral-small-latest": "mistralai/mistral-small",
+  "claude-opus-4-6": "anthropic/claude-opus-4-6",
+  "claude-sonnet-4-6": "anthropic/claude-sonnet-4-6",
   "claude-sonnet-4-5-20250929": "anthropic/claude-sonnet-4-5",
   "claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
   "gpt-4.1": "openai/gpt-4.1",
@@ -53,7 +55,7 @@ export function normalizeModelForProvider(model: string, provider: string): stri
 export function getLatexModel(provider: string): string {
   switch (provider) {
     case "anthropic":
-      return "claude-sonnet-4-5-20250929";
+      return "claude-sonnet-4-6";
     case "openai":
       return "gpt-4.1";
     case "gemini":
