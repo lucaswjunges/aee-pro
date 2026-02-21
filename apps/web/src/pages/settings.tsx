@@ -31,17 +31,19 @@ export function SettingsPage() {
   const [aiApiKey, setAiApiKey] = useState("");
   const [aiApiKeyMasked, setAiApiKeyMasked] = useState<string | null>(null);
   const [aiModel, setAiModel] = useState("");
+  const [maxOutputTokens, setMaxOutputTokens] = useState<number>(8000);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMsg, setAiMsg] = useState<string | null>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [testMsg, setTestMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    api.get<{ aiProvider: string | null; aiApiKeyMasked: string | null; aiModel: string | null }>("/settings").then((res) => {
+    api.get<{ aiProvider: string | null; aiApiKeyMasked: string | null; aiModel: string | null; maxOutputTokens: number | null }>("/settings").then((res) => {
       if (res.success && res.data) {
         setAiProvider((res.data.aiProvider as AIProviderType) || "");
         setAiApiKeyMasked(res.data.aiApiKeyMasked);
         setAiModel(res.data.aiModel || "");
+        setMaxOutputTokens(res.data.maxOutputTokens ?? 8000);
       }
     });
   }, []);
@@ -87,9 +89,10 @@ export function SettingsPage() {
   const handleAiSave = async () => {
     setAiLoading(true);
     setAiMsg(null);
-    const payload: Record<string, string | null> = {
+    const payload: Record<string, string | number | null> = {
       aiProvider: aiProvider || null,
       aiModel: aiModel || null,
+      maxOutputTokens,
     };
     if (aiApiKey) {
       payload.aiApiKey = aiApiKey;
@@ -246,6 +249,21 @@ export function SettingsPage() {
                 ))}
               </Select>
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="maxOutputTokens">Máximo de tokens de saída</Label>
+            <Input
+              id="maxOutputTokens"
+              type="number"
+              min={1000}
+              max={32000}
+              step={1000}
+              value={maxOutputTokens}
+              onChange={(e) => setMaxOutputTokens(Number(e.target.value))}
+            />
+            <p className="text-xs text-muted-foreground">
+              Controla o tamanho máximo dos documentos gerados. Padrão: 8000. Aumente se os documentos ficarem incompletos; reduza para economizar créditos de API.
+            </p>
           </div>
           {aiProvider && (
             <div className="rounded-md border bg-muted/50 p-3 space-y-1">

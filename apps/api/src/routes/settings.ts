@@ -36,6 +36,7 @@ settingsRoutes.get("/", async (c) => {
         aiProvider: null,
         aiApiKeyMasked: null,
         aiModel: null,
+        maxOutputTokens: null,
       },
     });
   }
@@ -56,6 +57,7 @@ settingsRoutes.get("/", async (c) => {
       aiProvider: settings.aiProvider,
       aiApiKeyMasked,
       aiModel: settings.aiModel,
+      maxOutputTokens: settings.maxOutputTokens,
     },
   });
 });
@@ -98,6 +100,7 @@ settingsRoutes.put("/", async (c) => {
         aiProvider: parsed.data.aiProvider !== undefined ? parsed.data.aiProvider : existing.aiProvider,
         aiApiKeyEncrypted,
         aiModel: parsed.data.aiModel !== undefined ? parsed.data.aiModel : existing.aiModel,
+        maxOutputTokens: parsed.data.maxOutputTokens !== undefined ? parsed.data.maxOutputTokens : existing.maxOutputTokens,
         updatedAt: now,
       })
       .where(eq(userSettings.userId, userId));
@@ -108,6 +111,7 @@ settingsRoutes.put("/", async (c) => {
       aiProvider: parsed.data.aiProvider ?? null,
       aiApiKeyEncrypted,
       aiModel: parsed.data.aiModel ?? null,
+      maxOutputTokens: parsed.data.maxOutputTokens ?? null,
       createdAt: now,
       updatedAt: now,
     });
