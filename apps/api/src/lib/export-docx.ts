@@ -7,6 +7,20 @@ import {
   AlignmentType,
 } from "docx";
 
+/** Split text on **bold** markers and return TextRun array */
+function inlineRuns(text: string, size: number): TextRun[] {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part) => {
+    const m = part.match(/^\*\*(.+)\*\*$/);
+    return new TextRun({ text: m ? m[1] : part, bold: m ? true : undefined, size, font: "Arial" });
+  });
+}
+
+/** Strip **markers** from heading text (headings are already bold via style) */
+function stripBold(text: string): string {
+  return text.replace(/\*\*([^*]+)\*\*/g, "$1");
+}
+
 export async function generateDocx(
   title: string,
   content: string,
@@ -58,23 +72,25 @@ export async function generateDocx(
     }
 
     // Detect markdown-style headings
-    const h2Match = trimmed.match(/^##\s+(.+)/);
-    const h1Match = trimmed.match(/^#\s+(.+)/);
+    const h3Match = trimmed.match(/^###\s+(.+)/);
+    const h2Match = !h3Match && trimmed.match(/^##\s+(.+)/);
+    const h1Match = !h3Match && !h2Match && trimmed.match(/^#\s+(.+)/);
     const boldMatch = trimmed.match(/^\*\*(.+?)\*\*$/);
 
-    if (h1Match) {
+    if (h3Match) {
+      paragraphs.push(
+        new Paragraph({
+          heading: HeadingLevel.HEADING_3,
+          spacing: { before: 200, after: 80 },
+          children: [new TextRun({ text: stripBold(h3Match[1]), bold: true, size: 22, font: "Arial" })],
+        })
+      );
+    } else if (h1Match) {
       paragraphs.push(
         new Paragraph({
           heading: HeadingLevel.HEADING_1,
           spacing: { before: 300, after: 150 },
-          children: [
-            new TextRun({
-              text: h1Match[1],
-              bold: true,
-              size: 26,
-              font: "Arial",
-            }),
-          ],
+          children: [new TextRun({ text: stripBold(h1Match[1]), bold: true, size: 26, font: "Arial" })],
         })
       );
     } else if (h2Match) {
@@ -82,57 +98,19 @@ export async function generateDocx(
         new Paragraph({
           heading: HeadingLevel.HEADING_2,
           spacing: { before: 250, after: 100 },
-          children: [
-            new TextRun({
-              text: h2Match[1],
-              bold: true,
-              size: 24,
-              font: "Arial",
-            }),
-          ],
+          children: [new TextRun({ text: stripBold(h2Match[1]), bold: true, size: 24, font: "Arial" })],
         })
       );
     } else if (boldMatch) {
       paragraphs.push(
         new Paragraph({
           spacing: { before: 200, after: 100 },
-          children: [
-            new TextRun({
-              text: boldMatch[1],
-              bold: true,
-              size: 22,
-              font: "Arial",
-            }),
-          ],
+          children: [new TextRun({ text: boldMatch[1], bold: true, size: 22, font: "Arial" })],
         })
       );
     } else {
-      // Process inline bold (**text**) within regular paragraphs
-      const parts = trimmed.split(/(\*\*[^*]+\*\*)/g);
-      const runs: TextRun[] = parts
-        .filter((p) => p)
-        .map((part) => {
-          const inlineBold = part.match(/^\*\*(.+)\*\*$/);
-          if (inlineBold) {
-            return new TextRun({
-              text: inlineBold[1],
-              bold: true,
-              size: 22,
-              font: "Arial",
-            });
-          }
-          return new TextRun({
-            text: part,
-            size: 22,
-            font: "Arial",
-          });
-        });
-
       paragraphs.push(
-        new Paragraph({
-          spacing: { after: 80 },
-          children: runs,
-        })
+        new Paragraph({ spacing: { after: 80 }, children: inlineRuns(trimmed, 22) })
       );
     }
   }

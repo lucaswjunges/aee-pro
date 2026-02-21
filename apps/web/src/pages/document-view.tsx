@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Pencil, Eye, FileDown, Printer, Loader2, Download, FileCode } from "lucide-react";
+import { ArrowLeft, Pencil, Eye, FileDown, Printer, Loader2, Download, FileCode, RefreshCw } from "lucide-react";
 import type { Document } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,41 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentEditor } from "@/components/documents/document-editor";
 import { api, API_BASE } from "@/lib/api";
 import { VOCE_SABIA } from "@/lib/voce-sabia";
+
+/** Render a line with inline **bold** converted to <strong> */
+function renderInline(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    const m = part.match(/^\*\*(.+)\*\*$/);
+    if (m) return <strong key={i}>{m[1]}</strong>;
+    return part;
+  });
+}
+
+/** Render AI-generated markdown content without raw symbols */
+function MarkdownContent({ content }: { content: string }) {
+  const lines = content.split("\n");
+  return (
+    <div className="text-sm leading-relaxed break-words print:text-[12pt] print:leading-[1.6] space-y-1">
+      {lines.map((line, i) => {
+        const t = line.trim();
+        if (!t) return <div key={i} className="h-2" />;
+        if (/^[*\-]{3,}$/.test(t)) return <hr key={i} className="my-3 border-border" />;
+
+        const h3 = t.match(/^###\s+(.+)/);
+        const h2 = t.match(/^##\s+(.+)/);
+        const h1 = t.match(/^#\s+(.+)/);
+        const boldLine = t.match(/^\*\*(.+?)\*\*$/);
+
+        if (h1) return <h2 key={i} className="text-lg font-bold mt-4 mb-1">{renderInline(h1[1])}</h2>;
+        if (h2) return <h3 key={i} className="text-base font-bold mt-3 mb-1">{renderInline(h2[1])}</h3>;
+        if (h3) return <h4 key={i} className="text-sm font-semibold mt-3 mb-1">{renderInline(h3[1])}</h4>;
+        if (boldLine) return <p key={i} className="font-semibold">{boldLine[1]}</p>;
+        return <p key={i}>{renderInline(t)}</p>;
+      })}
+    </div>
+  );
+}
 
 export function DocumentViewPage() {
   const { id, docId } = useParams<{ id: string; docId: string }>();
@@ -19,6 +54,7 @@ export function DocumentViewPage() {
   const [exporting, setExporting] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const voceSabia = useMemo(() => VOCE_SABIA[Math.floor(Math.random() * VOCE_SABIA.length)], []);
 
   useEffect(() => {
@@ -81,6 +117,19 @@ export function DocumentViewPage() {
       alert(`Erro ao gerar PDF: ${msg}`);
     }
     setExportingPdf(false);
+  };
+
+  const handleRegenerate = async () => {
+    if (!docId || !id) return;
+    if (!confirm("Gerar uma nova versão deste documento? A versão atual será substituída.")) return;
+    setRegenerating(true);
+    const res = await api.post<Document>(`/documents/${docId}/regenerate`, {});
+    if (res.success && res.data) {
+      navigate(`/alunos/${id}/documentos/${res.data.id}`);
+    } else {
+      alert(res.error ?? "Erro ao regenerar");
+      setRegenerating(false);
+    }
   };
 
   const handleConvertToLatex = async () => {
@@ -204,6 +253,19 @@ export function DocumentViewPage() {
           <Button
             variant="outline"
             size="sm"
+            onClick={handleRegenerate}
+            disabled={regenerating}
+          >
+            {regenerating ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4 mr-1" />
+            )}
+            {regenerating ? "Gerando..." : "Regenerar"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleConvertToLatex}
             disabled={converting}
           >
@@ -252,9 +314,7 @@ export function DocumentViewPage() {
                 />
               </div>
             ) : (
-              <div className="whitespace-pre-wrap text-sm leading-relaxed break-words print:text-[12pt] print:leading-[1.6]">
-                {document.content}
-              </div>
+              <MarkdownContent content={document.content ?? ""} />
             )}
           </CardContent>
         </Card>
