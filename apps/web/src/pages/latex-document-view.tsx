@@ -159,8 +159,30 @@ export function LatexDocumentViewPage() {
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  const [printing, setPrinting] = useState(false);
+
+  const handlePrint = async () => {
+    if (!docId) return;
+    setPrinting(true);
+    const token = localStorage.getItem("token");
+    const res = await fetch(`${API_BASE}/latex-documents/${docId}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    setPrinting(false);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const iframe = window.document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;";
+    iframe.src = url;
+    window.document.body.appendChild(iframe);
+    iframe.onload = () => {
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        window.document.body.removeChild(iframe);
+        URL.revokeObjectURL(url);
+      }, 60_000);
+    };
   };
 
   const handleSaveSource = async () => {
@@ -282,9 +304,9 @@ export function LatexDocumentViewPage() {
               <Download className="h-4 w-4 mr-1" />
               PDF
             </Button>
-            <Button variant="outline" size="sm" onClick={handlePrint}>
-              <Printer className="h-4 w-4 mr-1" />
-              Imprimir
+            <Button variant="outline" size="sm" onClick={handlePrint} disabled={printing}>
+              {printing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Printer className="h-4 w-4 mr-1" />}
+              {printing ? "Carregando..." : "Imprimir"}
             </Button>
           </>
         )}
