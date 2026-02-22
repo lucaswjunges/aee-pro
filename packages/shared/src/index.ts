@@ -6,3 +6,5 @@ export * from "./types/document";
 export * from "./schemas/user";
 export * from "./schemas/student";
 export * from "./schemas/settings";
+export * from "./types/session";
+export * from "./schemas/session";

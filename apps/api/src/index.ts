@@ -8,6 +8,7 @@ import { promptRoutes } from "./routes/prompts";
 import { dashboardRoutes } from "./routes/dashboard";
 import { latexDocumentRoutes } from "./routes/latex-documents";
 import { imageRoutes } from "./routes/images";
+import { aeeSessionRoutes } from "./routes/aee-sessions";
 
 export type Env = {
   Bindings: {
@@ -44,6 +45,7 @@ app.route("/api/prompts", promptRoutes);
 app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/latex-documents", latexDocumentRoutes);
 app.route("/api/images", imageRoutes);
+app.route("/api/aee-sessions", aeeSessionRoutes);
 
 export default {
   fetch: app.fetch.bind(app),

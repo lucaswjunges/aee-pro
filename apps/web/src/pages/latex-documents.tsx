@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Plus, ArrowLeft, FileText, FileCode } from "lucide-react";
+import { Plus, ArrowLeft, FileText, FileCode, ClipboardList } from "lucide-react";
 import type { Student, LatexDocument } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -108,6 +108,13 @@ export function LatexDocumentsPage() {
 
       {/* Tab bar */}
       <div className="flex border-b">
+        <Link
+          to={`/alunos/${id}/sessoes`}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent"
+        >
+          <ClipboardList className="h-4 w-4" />
+          Sessões
+        </Link>
         <Link
           to={`/alunos/${id}/documentos`}
           className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent"
