@@ -12,6 +12,7 @@ import { DocumentViewPage } from "@/pages/document-view";
 import { LatexDocumentsPage } from "@/pages/latex-documents";
 import { LatexDocumentViewPage } from "@/pages/latex-document-view";
 import { StudentSessionsPage } from "@/pages/student-sessions";
+import { SessionViewPage } from "@/pages/session-view";
 import { SettingsPage } from "@/pages/settings";
 import { PromptsPage } from "@/pages/prompts";
 import { PrivacyPage } from "@/pages/privacy";
@@ -75,6 +76,7 @@ export function AppRouter() {
         <Route path="alunos/novo" element={<StudentNewPage />} />
         <Route path="alunos/:id/editar" element={<StudentEditPage />} />
         <Route path="alunos/:id/sessoes" element={<StudentSessionsPage />} />
+        <Route path="alunos/:id/sessoes/:sessionId" element={<SessionViewPage />} />
         <Route path="alunos/:id/documentos" element={<StudentDocumentsPage />} />
         <Route path="alunos/:id/documentos/:docId" element={<DocumentViewPage />} />
         <Route path="alunos/:id/documentos-latex" element={<LatexDocumentsPage />} />

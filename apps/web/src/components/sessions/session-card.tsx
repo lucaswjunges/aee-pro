@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { Pencil, Trash2, Clock, Calendar } from "lucide-react";
 import type { AeeSession } from "@aee-pro/shared";
 import { SESSION_TYPES } from "@aee-pro/shared";
@@ -20,8 +21,19 @@ function getSessionTypeLabel(value: string) {
 }
 
 export function SessionCard({ session, onEdit, onDelete }: SessionCardProps) {
+  const navigate = useNavigate();
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't navigate if clicking on action buttons
+    if ((e.target as HTMLElement).closest("button")) return;
+    navigate(`/alunos/${session.studentId}/sessoes/${session.id}`);
+  };
+
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-3">
+    <div
+      className="rounded-lg border bg-card p-4 space-y-3 cursor-pointer hover:border-primary/40 transition-colors"
+      onClick={handleCardClick}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1.5 text-sm font-medium">
