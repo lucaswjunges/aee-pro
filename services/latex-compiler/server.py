@@ -1226,6 +1226,321 @@ def generate_and_compile(
     )
 
 
+# ---------------------------------------------------------------------------
+# POST /compile-dossie — assemble a student dossier from existing PDFs
+# ---------------------------------------------------------------------------
+
+class DossiePdfPayload(BaseModel):
+    title: str
+    data_base64: str
+
+
+class CompileDossieRequest(BaseModel):
+    student_name: str
+    student_school: str | None = None
+    student_diagnosis: str | None = None
+    student_grade: str | None = None
+    pdfs: list[DossiePdfPayload]
+
+
+class CompileDossieResponse(BaseModel):
+    success: bool
+    pdf_base64: str | None = None
+    pdf_size_bytes: int | None = None
+    error: str | None = None
+
+
+MAX_DOSSIE_DOCS = 30
+MAX_DOSSIE_PDF_BYTES = 20 * 1024 * 1024  # 20 MB per PDF
+
+
+def _escape_latex_str(s: str) -> str:
+    """Escape special LaTeX characters in a plain string."""
+    replacements = [
+        ("\\", r"\textbackslash{}"),
+        ("&", r"\&"),
+        ("%", r"\%"),
+        ("$", r"\$"),
+        ("#", r"\#"),
+        ("_", r"\_"),
+        ("{", r"\{"),
+        ("}", r"\}"),
+        ("~", r"\textasciitilde{}"),
+        ("^", r"\textasciicircum{}"),
+    ]
+    for old, new in replacements:
+        s = s.replace(old, new)
+    return s
+
+
+def _build_dossie_latex(req: CompileDossieRequest, pdf_filenames: list[str]) -> str:
+    """Build a LaTeX wrapper that assembles a dossier from individual PDFs."""
+    student = _escape_latex_str(req.student_name)
+    school = _escape_latex_str(req.student_school or "")
+    diagnosis = _escape_latex_str(req.student_diagnosis or "")
+    grade = _escape_latex_str(req.student_grade or "")
+
+    # Build document list for cover page
+    doc_items = ""
+    for i, pdf_payload in enumerate(req.pdfs):
+        title = _escape_latex_str(pdf_payload.title)
+        doc_items += f"    \\item {title}\n"
+
+    n_docs = len(req.pdfs)
+    year = "2026"
+    try:
+        from datetime import date
+        year = str(date.today().year)
+    except Exception:
+        pass
+
+    # Build info lines for cover
+    info_lines = []
+    info_lines.append(f"\\textbf{{Aluno(a):}} {student}")
+    if school:
+        info_lines.append(f"\\textbf{{Escola:}} {school}")
+    if grade:
+        info_lines.append(f"\\textbf{{Ano/Série:}} {grade}")
+    if diagnosis:
+        info_lines.append(f"\\textbf{{Diagnóstico:}} {diagnosis}")
+    info_lines.append(f"\\textbf{{Documentos:}} {n_docs}")
+
+    info_nodes = ""
+    y_offset = 0
+    for line in info_lines:
+        info_nodes += f"      \\node[anchor=west] at (1.2, {3.5 - y_offset}) {{{\\large {line}}};\n"
+        y_offset += 0.8
+
+    # ToC entries + includepdf for each document
+    include_sections = ""
+    for i, (pdf_payload, fname) in enumerate(zip(req.pdfs, pdf_filenames)):
+        title = _escape_latex_str(pdf_payload.title)
+        include_sections += f"""
+%% --- Document {i+1}: {pdf_payload.title} ---
+\\addcontentsline{{toc}}{{section}}{{{title}}}
+\\includepdf[pages=-,pagecommand={{\\thispagestyle{{fancy}}}}]{{{fname}}}
+"""
+
+    latex = f"""\\documentclass[a4paper,12pt]{{article}}
+\\usepackage[utf8]{{inputenc}}
+\\usepackage[T1]{{fontenc}}
+\\usepackage[brazil]{{babel}}
+\\usepackage[margin=2cm]{{geometry}}
+\\usepackage{{pdfpages}}
+\\usepackage{{fancyhdr}}
+\\usepackage{{tocloft}}
+\\usepackage{{tikz}}
+\\usetikzlibrary{{positioning,calc,shadows}}
+\\usepackage{{enumitem}}
+\\usepackage{{hyperref}}
+
+% Colors
+\\definecolor{{aeeblue}}{{HTML}}{{1E3A5F}}
+\\definecolor{{aeegold}}{{HTML}}{{C9A84C}}
+\\definecolor{{aeelightblue}}{{HTML}}{{E8F0FE}}
+\\definecolor{{textgray}}{{HTML}}{{333333}}
+
+% Header/footer
+\\pagestyle{{fancy}}
+\\fancyhf{{}}
+\\fancyhead[L]{{\\small\\color{{textgray}}\\textit{{Dossiê — {student}}}}}
+\\fancyhead[R]{{\\small\\color{{textgray}}\\textit{{AEE+ PRO}}}}
+\\fancyfoot[C]{{\\small\\color{{textgray}}\\thepage}}
+\\renewcommand{{\\headrulewidth}}{{0.4pt}}
+\\renewcommand{{\\footrulewidth}}{{0pt}}
+
+% ToC styling
+\\renewcommand{{\\cftsecfont}}{{\\color{{aeeblue}}\\bfseries}}
+\\renewcommand{{\\cftsecpagefont}}{{\\color{{aeeblue}}}}
+\\renewcommand{{\\cftsecleader}}{{\\cftdotfill{{\\cftdotsep}}}}
+
+\\hypersetup{{
+  colorlinks=true,
+  linkcolor=aeeblue,
+  urlcolor=aeeblue,
+}}
+
+\\begin{{document}}
+
+%% ========== COVER PAGE ==========
+\\thispagestyle{{empty}}
+\\begin{{tikzpicture}}[remember picture, overlay]
+  % Blue header band
+  \\fill[aeeblue] (current page.north west) rectangle ([yshift=-4cm]current page.north east);
+  % Gold accent line
+  \\fill[aeegold] ([yshift=-4cm]current page.north west) rectangle ([yshift=-4.3cm]current page.north east);
+
+  % Title on blue band
+  \\node[anchor=west, white, font=\\Huge\\bfseries] at ([xshift=2cm, yshift=-2cm]current page.north west)
+    {{Dossiê do Aluno}};
+  \\node[anchor=west, aeegold, font=\\large] at ([xshift=2cm, yshift=-3cm]current page.north west)
+    {{Atendimento Educacional Especializado}};
+
+  % Student info card
+  \\node[
+    anchor=north west,
+    draw=aeeblue!30,
+    fill=aeelightblue,
+    rounded corners=8pt,
+    minimum width=14cm,
+    inner sep=15pt,
+    drop shadow={{shadow xshift=1pt, shadow yshift=-1pt, opacity=0.15}},
+  ] at ([xshift=2cm, yshift=-6cm]current page.north west) {{
+    \\begin{{minipage}}{{13cm}}
+{info_nodes}
+    \\end{{minipage}}
+  }};
+
+  % Document list
+  \\node[
+    anchor=north west,
+    font=\\large\\bfseries\\color{{aeeblue}},
+  ] at ([xshift=2cm, yshift=-{10 + len(info_lines) * 0.5}cm]current page.north west)
+    {{Documentos incluídos:}};
+
+  \\node[
+    anchor=north west,
+    text width=14cm,
+  ] at ([xshift=2cm, yshift=-{11 + len(info_lines) * 0.5}cm]current page.north west) {{
+    \\begin{{enumerate}}[leftmargin=1.5em, itemsep=2pt]
+{doc_items}    \\end{{enumerate}}
+  }};
+
+  % Footer
+  \\node[anchor=south, font=\\small\\color{{textgray}}] at ([yshift=2cm]current page.south)
+    {{Gerado por AEE+ PRO — {year}}};
+
+  % Gold bottom line
+  \\fill[aeegold] ([yshift=1.2cm]current page.south west) rectangle ([yshift=1.5cm]current page.south east);
+\\end{{tikzpicture}}
+
+\\clearpage
+
+%% ========== TABLE OF CONTENTS ==========
+\\tableofcontents
+\\clearpage
+
+%% ========== INCLUDED DOCUMENTS ==========
+{include_sections}
+
+\\end{{document}}
+"""
+    return latex
+
+
+@app.post("/compile-dossie", response_model=CompileDossieResponse)
+def compile_dossie(
+    req: CompileDossieRequest,
+    authorization: str = Header(default=""),
+):
+    """Assemble multiple PDFs into a single dossier with cover page and ToC."""
+    if AUTH_TOKEN:
+        token = authorization.removeprefix("Bearer ").strip()
+        if token != AUTH_TOKEN:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if len(req.pdfs) == 0:
+        return CompileDossieResponse(success=False, error="Nenhum documento fornecido")
+
+    if len(req.pdfs) > MAX_DOSSIE_DOCS:
+        return CompileDossieResponse(
+            success=False,
+            error=f"Máximo de {MAX_DOSSIE_DOCS} documentos por dossiê",
+        )
+
+    tmpdir = tempfile.mkdtemp(prefix="dossie_")
+    try:
+        # Write each PDF to tmpdir
+        pdf_filenames: list[str] = []
+        for i, pdf_payload in enumerate(req.pdfs):
+            data = base64.b64decode(pdf_payload.data_base64)
+            if len(data) > MAX_DOSSIE_PDF_BYTES:
+                return CompileDossieResponse(
+                    success=False,
+                    error=f"PDF '{pdf_payload.title}' excede {MAX_DOSSIE_PDF_BYTES // (1024*1024)}MB",
+                )
+            fname = f"doc{i:03d}.pdf"
+            pdf_filenames.append(fname)
+            with open(os.path.join(tmpdir, fname), "wb") as f:
+                f.write(data)
+
+        # Build LaTeX wrapper
+        latex_source = _build_dossie_latex(req, pdf_filenames)
+        tex_path = os.path.join(tmpdir, "dossie.tex")
+        pdf_path = os.path.join(tmpdir, "dossie.pdf")
+
+        with open(tex_path, "w", encoding="utf-8") as f:
+            f.write(latex_source)
+
+        # Compile twice (for ToC resolution)
+        for pass_num in range(2):
+            result = subprocess.run(
+                [
+                    "pdflatex",
+                    "-interaction=nonstopmode",
+                    "-halt-on-error",
+                    "-output-directory", tmpdir,
+                    tex_path,
+                ],
+                capture_output=True,
+                timeout=120,
+                cwd=tmpdir,
+            )
+
+            if result.returncode != 0:
+                stdout = result.stdout.decode("utf-8", errors="replace") if result.stdout else ""
+                log_path = os.path.join(tmpdir, "dossie.log")
+                error_log = ""
+                if os.path.exists(log_path):
+                    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                        lines = f.readlines()
+                    error_lines = []
+                    capture = False
+                    for line in lines:
+                        if line.startswith("!") or capture:
+                            error_lines.append(line.rstrip())
+                            capture = True
+                            if len(error_lines) > 5:
+                                capture = False
+                        if len(error_lines) > 30:
+                            break
+                    error_log = "\n".join(error_lines) if error_lines else stdout[-2000:]
+                else:
+                    error_log = stdout[-2000:]
+                return CompileDossieResponse(
+                    success=False,
+                    error=f"Falha na compilação (pass {pass_num + 1}): {error_log[:3000]}",
+                )
+
+        if not os.path.exists(pdf_path):
+            return CompileDossieResponse(
+                success=False,
+                error="PDF do dossiê não foi gerado",
+            )
+
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        return CompileDossieResponse(
+            success=True,
+            pdf_base64=base64.b64encode(pdf_bytes).decode("ascii"),
+            pdf_size_bytes=len(pdf_bytes),
+        )
+
+    except subprocess.TimeoutExpired:
+        return CompileDossieResponse(
+            success=False,
+            error="Compilação do dossiê excedeu o tempo limite (120s)",
+        )
+    except Exception as e:
+        return CompileDossieResponse(
+            success=False,
+            error=f"Erro no servidor: {str(e)}",
+        )
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)

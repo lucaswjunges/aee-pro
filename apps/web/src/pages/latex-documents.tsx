@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Plus, ArrowLeft, FileText, FileCode, ClipboardList } from "lucide-react";
+import { Plus, ArrowLeft, FileText, FileCode, ClipboardList, BookOpen } from "lucide-react";
 import type { Student, LatexDocument } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LatexDocumentList } from "@/components/latex/latex-document-list";
 import { LatexGenerateDialog } from "@/components/latex/latex-generate-dialog";
+import { DossieDialog } from "@/components/latex/dossie-dialog";
 import { api } from "@/lib/api";
 
 export function LatexDocumentsPage() {
@@ -14,6 +15,7 @@ export function LatexDocumentsPage() {
   const [documents, setDocuments] = useState<LatexDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dossieDialogOpen, setDossieDialogOpen] = useState(false);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
 
   const fetchData = async () => {
@@ -98,10 +100,21 @@ export function LatexDocumentsPage() {
               <h1 className="text-xl sm:text-2xl font-bold">Documentos</h1>
               <p className="text-muted-foreground truncate">{student.name}</p>
             </div>
-            <Button onClick={() => setDialogOpen(true)} size="sm">
-              <Plus className="h-4 w-4 mr-1" />
-              Gerar Documento LaTeX
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDossieDialogOpen(true)}
+                disabled={!documents.some((d) => d.status === "completed" && d.pdfR2Key)}
+              >
+                <BookOpen className="h-4 w-4 mr-1" />
+                Dossiê
+              </Button>
+              <Button onClick={() => setDialogOpen(true)} size="sm">
+                <Plus className="h-4 w-4 mr-1" />
+                Gerar Documento LaTeX
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -147,6 +160,14 @@ export function LatexDocumentsPage() {
         studentId={id!}
         studentName={student.name}
         onGenerated={fetchData}
+      />
+
+      <DossieDialog
+        open={dossieDialogOpen}
+        onOpenChange={setDossieDialogOpen}
+        studentId={id!}
+        studentName={student.name}
+        documents={documents}
       />
     </div>
   );

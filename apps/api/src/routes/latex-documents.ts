@@ -188,6 +188,130 @@ function injectSignatureBlock(body: string, documentType: string, student: Recor
   return body.substring(0, insertIdx) + "\n" + sig + "\n\n" + body.substring(insertIdx);
 }
 
+// ---------- POST /dossie ----------
+
+latexDocumentRoutes.post("/dossie", async (c) => {
+  const userId = c.get("userId");
+  const body = (await c.req.json()) as { studentId: string; documentIds: string[] };
+
+  if (!body.studentId || !Array.isArray(body.documentIds) || body.documentIds.length === 0) {
+    return c.json({ success: false, error: "studentId e documentIds são obrigatórios" }, 400);
+  }
+
+  if (body.documentIds.length > 30) {
+    return c.json({ success: false, error: "Máximo de 30 documentos por dossiê" }, 400);
+  }
+
+  const db = createDb(c.env.DB);
+
+  // Verify student ownership
+  const student = await db
+    .select()
+    .from(students)
+    .where(and(eq(students.id, body.studentId), eq(students.userId, userId)))
+    .get();
+
+  if (!student) {
+    return c.json({ success: false, error: "Aluno não encontrado" }, 404);
+  }
+
+  // Fetch requested documents (only completed ones with PDFs)
+  const allDocs = await db
+    .select()
+    .from(latexDocuments)
+    .where(and(eq(latexDocuments.userId, userId), eq(latexDocuments.studentId, body.studentId)))
+    .orderBy(desc(latexDocuments.createdAt));
+
+  const requestedIds = new Set(body.documentIds);
+  const validDocs = allDocs.filter(
+    (d) => requestedIds.has(d.id) && d.status === "completed" && d.pdfR2Key,
+  );
+
+  if (validDocs.length === 0) {
+    return c.json({ success: false, error: "Nenhum documento concluído com PDF encontrado" }, 400);
+  }
+
+  // Fetch all PDFs from R2 in parallel
+  const pdfResults = await Promise.all(
+    validDocs.map(async (doc) => {
+      const obj = await c.env.R2.get(doc.pdfR2Key!);
+      if (!obj) return null;
+      const buf = await obj.arrayBuffer();
+      return {
+        title: doc.title,
+        data_base64: btoa(String.fromCharCode(...new Uint8Array(buf))),
+      };
+    }),
+  );
+
+  const pdfs = pdfResults.filter((p): p is NonNullable<typeof p> => p !== null);
+
+  if (pdfs.length === 0) {
+    return c.json({ success: false, error: "Não foi possível recuperar os PDFs do armazenamento" }, 500);
+  }
+
+  // Send to Python compiler service
+  const compilerUrl = c.env.LATEX_COMPILER_URL;
+  const compilerToken = c.env.LATEX_COMPILER_TOKEN;
+
+  if (!compilerUrl) {
+    return c.json({ success: false, error: "Compilador LaTeX não configurado" }, 500);
+  }
+
+  let compileRes: Response;
+  try {
+    compileRes = await fetch(`${compilerUrl}/compile-dossie`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${compilerToken}`,
+      },
+      body: JSON.stringify({
+        student_name: student.name,
+        student_school: student.school ?? undefined,
+        student_diagnosis: student.diagnosis ?? undefined,
+        student_grade: student.grade ?? undefined,
+        pdfs,
+      }),
+      signal: AbortSignal.timeout(150_000),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return c.json({ success: false, error: `Erro ao conectar ao compilador: ${msg}` }, 502);
+  }
+
+  if (!compileRes.ok) {
+    const text = await compileRes.text().catch(() => "");
+    return c.json({ success: false, error: `Compilador retornou ${compileRes.status}: ${text.slice(0, 500)}` }, 502);
+  }
+
+  const result = (await compileRes.json()) as {
+    success: boolean;
+    pdf_base64?: string;
+    pdf_size_bytes?: number;
+    error?: string;
+  };
+
+  if (!result.success || !result.pdf_base64) {
+    return c.json({ success: false, error: result.error ?? "Erro na compilação do dossiê" }, 500);
+  }
+
+  // Return PDF blob directly
+  const pdfBuffer = Uint8Array.from(atob(result.pdf_base64), (ch) => ch.charCodeAt(0));
+  const safeName = student.name.replace(/[^a-zA-Z0-9\s-]/g, "").replace(/\s+/g, "_") || "Aluno";
+  const year = new Date().getFullYear();
+  const utf8Filename = encodeURIComponent(`Dossie_${student.name.replace(/\s+/g, "_")}_${year}`) + ".pdf";
+
+  const headers = new Headers();
+  headers.set("Content-Type", "application/pdf");
+  headers.set(
+    "Content-Disposition",
+    `attachment; filename="Dossie_${safeName}_${year}.pdf"; filename*=UTF-8''${utf8Filename}`,
+  );
+
+  return new Response(pdfBuffer, { headers });
+});
+
 // ---------- POST /generate ----------
 
 latexDocumentRoutes.post("/generate", async (c) => {
