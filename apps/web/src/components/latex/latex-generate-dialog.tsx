@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AlertCircle } from "lucide-react";
-import { LATEX_DOCUMENT_TYPES } from "@aee-pro/shared";
-import type { LatexDocument } from "@aee-pro/shared";
+import { LATEX_DOCUMENT_TYPES, PRINT_MODES } from "@aee-pro/shared";
+import type { LatexDocument, PrintMode } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { HeatSlider } from "./heat-slider";
@@ -28,6 +28,7 @@ export function LatexGenerateDialog({
   const [sizeLevel, setSizeLevel] = useState(3);
   const [customPrompt, setCustomPrompt] = useState("");
   const [unlimitedTokens, setUnlimitedTokens] = useState(false);
+  const [printMode, setPrintMode] = useState<PrintMode>("color");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +46,7 @@ export function LatexGenerateDialog({
       sizeLevel,
       customPrompt: customPrompt.trim() || undefined,
       unlimitedTokens,
+      printMode,
     });
 
     // Close dialog after 2s and refresh list — don't wait for the full response
@@ -80,7 +82,8 @@ export function LatexGenerateDialog({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="space-y-5">
+      {/* Scrollable content */}
+      <div className="overflow-y-auto flex-1 min-h-0 px-6 space-y-4">
         {/* Document type selector */}
         <div className="space-y-2">
           <label className="text-sm font-medium">Tipo de Documento</label>
@@ -117,6 +120,32 @@ export function LatexGenerateDialog({
           <span className="text-xs text-muted-foreground">(documento mais completo, consome mais)</span>
         </label>
 
+        {/* Print mode */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Modo de Impressão</label>
+          <div className="flex gap-4">
+            {PRINT_MODES.map((mode) => (
+              <label key={mode.value} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="printMode"
+                  value={mode.value}
+                  checked={printMode === mode.value}
+                  onChange={() => setPrintMode(mode.value)}
+                  disabled={submitting}
+                  className="accent-primary"
+                />
+                <span className="text-sm">{mode.name}</span>
+              </label>
+            ))}
+          </div>
+          {printMode === "bw" && (
+            <p className="text-xs text-muted-foreground">
+              PDF otimizado para impressora monocromática — todas as cores são convertidas para tons de cinza.
+            </p>
+          )}
+        </div>
+
         {/* Custom prompt */}
         <div className="space-y-1.5">
           <label className="text-sm font-medium">
@@ -127,7 +156,7 @@ export function LatexGenerateDialog({
             onChange={(e) => setCustomPrompt(e.target.value)}
             disabled={submitting}
             placeholder="Ex: Incluir seção sobre comunicação alternativa. Destacar habilidades em artes..."
-            rows={3}
+            rows={2}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground disabled:opacity-50 resize-none"
           />
         </div>
@@ -147,16 +176,16 @@ export function LatexGenerateDialog({
             </div>
           </div>
         )}
+      </div>
 
-        {/* Actions */}
-        <div className="flex justify-end gap-2 pt-2 border-t">
-          <Button variant="outline" size="sm" onClick={handleClose} disabled={submitting}>
-            Cancelar
-          </Button>
-          <Button size="sm" onClick={handleGenerate} disabled={submitting}>
-            {submitting ? "Gerando..." : "Gerar Documento"}
-          </Button>
-        </div>
+      {/* Fixed footer */}
+      <div className="flex justify-end gap-2 px-6 py-4 border-t shrink-0">
+        <Button variant="outline" size="sm" onClick={handleClose} disabled={submitting}>
+          Cancelar
+        </Button>
+        <Button size="sm" onClick={handleGenerate} disabled={submitting}>
+          {submitting ? "Gerando..." : "Gerar Documento"}
+        </Button>
       </div>
     </Dialog>
   );

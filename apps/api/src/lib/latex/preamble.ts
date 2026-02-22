@@ -2,10 +2,31 @@ interface PreambleOptions {
   documentTitle: string;
   studentName: string;
   schoolName: string;
+  printMode?: "color" | "bw";
 }
 
+const BW_COLOR_OVERRIDES = `
+% --- B&W Mode: Override all colors to grayscale ---
+\\definecolor{aeeblue}{gray}{0.20}
+\\definecolor{aeegold}{gray}{0.45}
+\\definecolor{aeelightblue}{gray}{0.93}
+\\definecolor{aeegreen}{gray}{0.30}
+\\definecolor{aeered}{gray}{0.25}
+\\definecolor{aeeorange}{gray}{0.35}
+\\definecolor{aeepurple}{gray}{0.28}
+\\definecolor{aeeteal}{gray}{0.30}
+\\definecolor{aeegray}{gray}{0.95}
+\\definecolor{textgray}{gray}{0.35}
+\\definecolor{lightgreen}{gray}{0.93}
+\\definecolor{lightorange}{gray}{0.95}
+\\definecolor{lightpurple}{gray}{0.94}
+\\definecolor{lightteal}{gray}{0.93}
+\\definecolor{lightred}{gray}{0.94}
+\\definecolor{lightyellow}{gray}{0.96}
+`;
+
 export function getLatexPreamble(options: PreambleOptions): string {
-  const { documentTitle, studentName, schoolName } = options;
+  const { documentTitle, studentName, schoolName, printMode } = options;
 
   return `% ============================================================================
 % ${documentTitle} - Atendimento Educacional Especializado (AEE)
@@ -64,7 +85,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 \\definecolor{lightteal}{HTML}{E0F2F1}
 \\definecolor{lightred}{HTML}{FFEBEE}
 \\definecolor{lightyellow}{HTML}{FFFDE7}
-
+${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
 % --- Math symbols ---
 \\usepackage{amssymb}
 \\usepackage{amsmath}
@@ -263,7 +284,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 
 % --- Hyperlinks ---
 \\usepackage[
-  colorlinks=true,
+  colorlinks=${printMode === "bw" ? "false" : "true"},
   linkcolor=aeeblue,
   urlcolor=aeeblue!70,
   citecolor=aeeblue

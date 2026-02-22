@@ -235,12 +235,20 @@ function getSignatories(
     case "adaptacao-avaliacoes":
     case "estudo-de-caso":
     case "parecer-descritivo":
+    case "avaliacao-diagnostica-funcional":
+    case "relatorio-transicao":
       return [aee, regular, coord];
 
     // Family-facing documents: AEE + Responsável
     case "anamnese":
     case "relatorio-familia":
+    case "entrevista-familia":
       return [aee, responsavel];
+
+    // AEE + Coordenação + Responsável
+    case "ficha-matricula-aee":
+    case "termo-lgpd":
+      return [aee, coord, responsavel];
 
     // Teacher-facing: AEE + Professor Regular
     case "relatorio-professor":

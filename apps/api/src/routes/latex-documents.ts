@@ -199,6 +199,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
     sizeLevel?: number;
     customPrompt?: string;
     unlimitedTokens?: boolean;
+    printMode?: "color" | "bw";
   };
 
   if (!body.studentId || !body.documentType) {
@@ -209,6 +210,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
   const sizeLevel = Math.max(1, Math.min(5, body.sizeLevel ?? 3));
   const customPrompt = body.customPrompt?.trim() || undefined;
   const unlimitedTokens = body.unlimitedTokens === true;
+  const printMode = body.printMode === "bw" ? "bw" as const : "color" as const;
 
   const typeConfig = getDocumentTypeConfig(body.documentType);
   if (!typeConfig) {
@@ -274,6 +276,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
     status: "generating",
     heatLevel,
     sizeLevel,
+    printMode,
     aiProvider: settings.aiProvider,
     aiModel: model,
     compilationAttempts: 0,
@@ -303,6 +306,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
         documentTitle: typeName,
         studentName: student.name,
         schoolName: student.school ?? "Escola",
+        printMode,
       });
 
       const signatureBlock = buildSignatureBlock(body.documentType, student as Parameters<typeof buildSignatureBlock>[1]);
@@ -332,9 +336,10 @@ latexDocumentRoutes.post("/generate", async (c) => {
             callback_url: callbackUrl,
             callback_token: c.env.LATEX_COMPILER_TOKEN,
             // Fallback: if service key is out of credits, use user's Anthropic key
-            ...(settings.aiProvider === "anthropic" && apiKey
-              ? { fallback_api_key: apiKey, fallback_model: model }
-              : {}),
+            // TODO: reativar quando orçamento permitir
+            // ...(settings.aiProvider === "anthropic" && apiKey
+            //   ? { fallback_api_key: apiKey, fallback_model: model }
+            //   : {}),
           }),
           signal: AbortSignal.timeout(30_000),
         });
@@ -395,6 +400,7 @@ latexDocumentRoutes.get("/", async (c) => {
       status: latexDocuments.status,
       heatLevel: latexDocuments.heatLevel,
       sizeLevel: latexDocuments.sizeLevel,
+      printMode: latexDocuments.printMode,
       aiProvider: latexDocuments.aiProvider,
       aiModel: latexDocuments.aiModel,
       compilationAttempts: latexDocuments.compilationAttempts,
@@ -447,6 +453,7 @@ latexDocumentRoutes.get("/", async (c) => {
         status: latexDocuments.status,
         heatLevel: latexDocuments.heatLevel,
         sizeLevel: latexDocuments.sizeLevel,
+        printMode: latexDocuments.printMode,
         aiProvider: latexDocuments.aiProvider,
         aiModel: latexDocuments.aiModel,
         compilationAttempts: latexDocuments.compilationAttempts,
@@ -1030,9 +1037,10 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
   // Delete old record
   await db.delete(latexDocuments).where(eq(latexDocuments.id, id));
 
-  // Build prompt with same heat/size
+  // Build prompt with same heat/size/printMode
   const heatLevel = doc.heatLevel;
   const sizeLevel = doc.sizeLevel;
+  const printMode = doc.printMode === "bw" ? "bw" as const : "color" as const;
   const { system, user } = buildLatexPrompt(
     student as unknown as Parameters<typeof buildLatexPrompt>[0],
     doc.documentType,
@@ -1054,6 +1062,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
     status: "generating",
     heatLevel,
     sizeLevel,
+    printMode,
     aiProvider: settings.aiProvider,
     aiModel: model,
     compilationAttempts: 0,
@@ -1082,6 +1091,7 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
         documentTitle: typeName,
         studentName: student.name,
         schoolName: student.school ?? "Escola",
+        printMode,
       });
 
       const signatureBlock = buildSignatureBlock(doc.documentType, student as Parameters<typeof buildSignatureBlock>[1]);
@@ -1109,9 +1119,10 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
             callback_url: callbackUrl,
             callback_token: c.env.LATEX_COMPILER_TOKEN,
             // Fallback: if service key is out of credits, use user's Anthropic key
-            ...(settings.aiProvider === "anthropic" && apiKey
-              ? { fallback_api_key: apiKey, fallback_model: model }
-              : {}),
+            // TODO: reativar quando orçamento permitir
+            // ...(settings.aiProvider === "anthropic" && apiKey
+            //   ? { fallback_api_key: apiKey, fallback_model: model }
+            //   : {}),
           }),
           signal: AbortSignal.timeout(30_000),
         });

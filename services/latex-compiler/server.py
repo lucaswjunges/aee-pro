@@ -933,6 +933,34 @@ def _compile_in_tmpdir(
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+_NOISE_WARNINGS = [
+    "Label(s) may have changed",
+    "There were multiply-defined labels",
+    "destination with the same identifier",
+    "Rerun to get",
+]
+
+
+def _filter_significant_warnings(warnings: list[str]) -> list[str]:
+    """Keep only warnings worth fixing; drop noise-only entries."""
+    return [w for w in warnings if not any(n in w for n in _NOISE_WARNINGS)]
+
+
+AUTOFIX_WARNINGS_SYSTEM = """Você é um especialista em LaTeX. O código abaixo compilou com sucesso, mas gerou os avisos listados.
+
+REGRAS — corrija os avisos SEM alterar o conteúdo do documento:
+1. Overfull \\hbox: reduza largura de colunas ou envolva tabular em \\adjustbox{max width=\\linewidth}{...}.
+2. Overfull \\vbox (tabela longa): converta \\begin{tabular} para \\begin{longtable} adicionando \\endfirsthead/\\endhead.
+3. Font shape undefined (T1/cmss/b/n, TS1/...): substitua caracteres ² por \\textsuperscript{2}, ³ por \\textsuperscript{3}.
+4. enumitem "Negative labelwidth": troque leftmargin=0pt por leftmargin=1.5em em description.
+5. Underfull \\hbox: aumente larguras de colunas estreitas ou adicione \\raggedright na coluna.
+6. LaTeX Font Warning "not available ... substituted": adicione \\normalfont ou troque \\bfseries por \\mdseries naquele contexto.
+7. NUNCA altere o conteúdo textual (seções, itens, dados).
+8. NUNCA coloque longtable dentro de adjustbox, tcolorbox ou qualquer grupo.
+
+Retorne o código LaTeX COMPLETO corrigido (de \\begin{document} até \\end{document}), sem explicações, sem fence blocks."""
+
+
 AUTOFIX_SYSTEM = """Você é um especialista em LaTeX. O código abaixo falhou na compilação com pdflatex.
 
 REGRAS DE CORREÇÃO:
@@ -1024,12 +1052,66 @@ def _do_generate_and_compile(req: GenerateAndCompileRequest) -> dict:
 
         if result.success and result.pdf_base64:
             _log.info(f"[compile] doc_id={req.doc_id!r} SUCCESS attempt {attempt}! PDF={result.pdf_size_bytes} bytes")
+
+            # --- Step 4: Warning-fix loop (up to 2 passes) ---
+            best_source = current_source
+            best_pdf_b64 = result.pdf_base64
+            best_pdf_size = result.pdf_size_bytes
+            best_warnings = result.warnings
+
+            significant = _filter_significant_warnings(result.warnings or [])
+            MAX_WARN_FIXES = 2
+            for wfix in range(1, MAX_WARN_FIXES + 1):
+                if not significant:
+                    break
+                _log.info(f"[warn-fix] doc_id={req.doc_id!r} pass {wfix}/{MAX_WARN_FIXES}: {len(significant)} significant warning(s)")
+                try:
+                    with client.messages.stream(
+                        model=ai_model,
+                        max_tokens=req.max_tokens,
+                        temperature=0.2,
+                        system=AUTOFIX_WARNINGS_SYSTEM,
+                        messages=[{
+                            "role": "user",
+                            "content": (
+                                "AVISOS DE COMPILAÇÃO:\n"
+                                + "\n".join(significant)
+                                + "\n\nCÓDIGO LATEX:\n"
+                                + best_source
+                            ),
+                        }],
+                    ) as wfix_stream:
+                        wfix_text = wfix_stream.get_final_text()
+
+                    wfix_body = _extract_latex_body(wfix_text)
+                    wfix_body = _sanitize_latex(wfix_body)
+                    preamble_end = best_source.find("\\begin{document}")
+                    wfix_source = (
+                        best_source[:preamble_end] + wfix_body
+                        if preamble_end != -1
+                        else req.preamble + wfix_body
+                    )
+                    wfix_result = _compile_in_tmpdir(wfix_source, req.images)
+                    if wfix_result.success and wfix_result.pdf_base64:
+                        best_source = wfix_source
+                        best_pdf_b64 = wfix_result.pdf_base64
+                        best_pdf_size = wfix_result.pdf_size_bytes
+                        best_warnings = wfix_result.warnings
+                        significant = _filter_significant_warnings(wfix_result.warnings or [])
+                        _log.info(f"[warn-fix] doc_id={req.doc_id!r} pass {wfix} OK, remaining significant: {len(significant)}")
+                    else:
+                        _log.warning(f"[warn-fix] doc_id={req.doc_id!r} pass {wfix} broke compilation — keeping previous version")
+                        break
+                except Exception as wfix_err:
+                    _log.error(f"[warn-fix] doc_id={req.doc_id!r} Claude call failed: {wfix_err}")
+                    break
+
             return {
                 "success": True,
-                "pdf_base64": result.pdf_base64,
-                "pdf_size_bytes": result.pdf_size_bytes,
-                "latex_source": current_source,
-                "warnings": result.warnings,
+                "pdf_base64": best_pdf_b64,
+                "pdf_size_bytes": best_pdf_size,
+                "latex_source": best_source,
+                "warnings": best_warnings,
                 "attempts": attempt,
                 "ai_model": ai_model,
             }

@@ -33,6 +33,7 @@ export interface LatexDocument {
   status: LatexDocumentStatus;
   heatLevel: number;
   sizeLevel: number;
+  printMode: string;
   aiProvider: string | null;
   aiModel: string | null;
   compilationAttempts: number;
@@ -59,6 +60,16 @@ export const LATEX_DOCUMENT_TYPES = [
   { slug: "agrupamento-alunos", name: "Agrupamento de Alunos" },
   { slug: "parecer-descritivo", name: "Parecer Descritivo" },
   { slug: "sugestao-atendimento", name: "Sugestão de Atendimento" },
+  { slug: "ficha-matricula-aee", name: "Ficha de Matrícula no AEE" },
+  { slug: "entrevista-familia", name: "Entrevista com a Família" },
+  { slug: "termo-lgpd", name: "Termo de Ciência e Autorização (LGPD)" },
+  { slug: "ficha-observacao-inicial", name: "Ficha de Observação Inicial" },
+  { slug: "avaliacao-diagnostica-funcional", name: "Avaliação Diagnóstica Funcional" },
+  { slug: "relatorio-bimestral", name: "Relatório Bimestral" },
+  { slug: "relatorio-coordenacao", name: "Relatório para Coordenação" },
+  { slug: "declaracao-atendimento", name: "Declaração de Atendimento" },
+  { slug: "encaminhamento-profissional", name: "Encaminhamento Profissional" },
+  { slug: "relatorio-transicao", name: "Relatório de Transição de Etapa" },
 ] as const;
 
 export const HEAT_LEVELS = [
@@ -76,6 +87,13 @@ export const SIZE_LEVELS = [
   { level: 4, name: "Detalhado", pages: "10-14", maxTokens: 24000 },
   { level: 5, name: "Completo", pages: "14-18", maxTokens: 32000 },
 ] as const;
+
+export const PRINT_MODES = [
+  { value: "color", name: "Colorido" },
+  { value: "bw", name: "Preto e Branco" },
+] as const;
+
+export type PrintMode = (typeof PRINT_MODES)[number]["value"];
 
 export interface Prompt {
   id: string;

@@ -19,6 +19,7 @@ export const latexDocuments = sqliteTable("latex_documents", {
   // status: generating | compiling | completed | compile_error | error
   heatLevel: integer("heat_level").notNull().default(3),
   sizeLevel: integer("size_level").notNull().default(3),
+  printMode: text("print_mode").notNull().default("color"),
   aiProvider: text("ai_provider"),
   aiModel: text("ai_model"),
   compilationAttempts: integer("compilation_attempts").default(0),
