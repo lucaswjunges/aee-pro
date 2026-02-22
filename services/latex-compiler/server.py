@@ -1308,7 +1308,8 @@ def _build_dossie_latex(req: CompileDossieRequest, pdf_filenames: list[str]) -> 
     info_nodes = ""
     y_offset = 0
     for line in info_lines:
-        info_nodes += f"      \\node[anchor=west] at (1.2, {3.5 - y_offset}) {{{\\large {line}}};\n"
+        y_pos = 3.5 - y_offset
+        info_nodes += f"      \\node[anchor=west] at (1.2, {y_pos}) {{\\large {line}}};\n"
         y_offset += 0.8
 
     # ToC entries + includepdf for each document
