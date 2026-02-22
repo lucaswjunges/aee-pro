@@ -16,6 +16,8 @@ export type Env = {
     SESSION_SECRET: string;
     LATEX_COMPILER_URL: string;
     LATEX_COMPILER_TOKEN: string;
+    RESEND_API_KEY: string;
+    FRONTEND_URL: string;
   };
 };
 

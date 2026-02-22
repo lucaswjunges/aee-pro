@@ -23,5 +23,7 @@ bucket_name = "aee-pro-documents"
 #   wrangler secret put SESSION_SECRET
 #   wrangler secret put LATEX_COMPILER_URL
 #   wrangler secret put LATEX_COMPILER_TOKEN
+#   wrangler secret put RESEND_API_KEY
+#   wrangler secret put FRONTEND_URL
 # [vars]
 # SESSION_SECRET is set via `wrangler secret put` (never in this file)

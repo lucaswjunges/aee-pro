@@ -69,6 +69,12 @@ export function LoginPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Entrando..." : "Entrar"}
             </Button>
+            <Link
+              to="/esqueci-minha-senha"
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              Esqueci minha senha
+            </Link>
             <p className="text-sm text-muted-foreground">
               Não tem conta?{" "}
               <Link to="/register" className="text-primary underline">

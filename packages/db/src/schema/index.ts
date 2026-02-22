@@ -6,3 +6,4 @@ export * from "./prompts";
 export * from "./documents";
 export * from "./latex-documents";
 export * from "./user-images";
+export * from "./password-reset-tokens";

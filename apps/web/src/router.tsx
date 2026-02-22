@@ -16,6 +16,8 @@ import { PromptsPage } from "@/pages/prompts";
 import { PrivacyPage } from "@/pages/privacy";
 import { AllDocumentsPage } from "@/pages/all-documents";
 import { NotFoundPage } from "@/pages/not-found";
+import { ForgotPasswordPage } from "@/pages/forgot-password";
+import { ResetPasswordPage } from "@/pages/reset-password";
 
 function GuestRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -50,6 +52,15 @@ export function AppRouter() {
           </GuestRoute>
         }
       />
+      <Route
+        path="/esqueci-minha-senha"
+        element={
+          <GuestRoute>
+            <ForgotPasswordPage />
+          </GuestRoute>
+        }
+      />
+      <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route
         element={
           <ProtectedRoute>
