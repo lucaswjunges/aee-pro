@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Plus, ArrowLeft, Wand2, FileText, FileCode, ClipboardList, TrendingUp } from "lucide-react";
+import { Plus, ArrowLeft, Wand2, FileText, FileCode, ClipboardList, TrendingUp, Sparkles } from "lucide-react";
 import type { Student, Document } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,13 +19,18 @@ export function StudentDocumentsPage() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchEditOpen, setBatchEditOpen] = useState(false);
+  const [estudioProjectId, setEstudioProjectId] = useState<string | null>(null);
 
   const fetchData = async () => {
     if (!id) return;
-    const [studentRes, docsRes] = await Promise.all([
+    const [studentRes, docsRes, wsRes] = await Promise.all([
       api.get<Student>(`/students/${id}`),
       api.get<Document[]>(`/documents?studentId=${id}`),
+      api.get<Array<{ id: string }>>(`/workspace/projects?studentId=${id}`),
     ]);
+    if (wsRes.success && wsRes.data && wsRes.data.length > 0) {
+      setEstudioProjectId(wsRes.data[0].id);
+    }
     if (studentRes.success && studentRes.data) setStudent(studentRes.data);
     if (docsRes.success && docsRes.data) setDocuments(docsRes.data);
     setLoading(false);
@@ -99,7 +104,15 @@ export function StudentDocumentsPage() {
               <h1 className="text-xl sm:text-2xl font-bold">Documentos</h1>
               <p className="text-muted-foreground truncate">{student.name}</p>
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex gap-2 shrink-0 flex-wrap">
+              {estudioProjectId && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to={`/estudio/${estudioProjectId}`}>
+                    <Sparkles className="h-4 w-4 mr-1" />
+                    Abrir no Estúdio
+                  </Link>
+                </Button>
+              )}
               {documents.some((d) => d.status === "completed") && (
                 <Button
                   variant={selectionMode ? "outline" : "secondary"}

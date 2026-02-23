@@ -1,18 +1,57 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Plus, ArrowLeft, FileText, FileCode, ClipboardList, BookOpen, TrendingUp } from "lucide-react";
+import {
+  Plus,
+  ArrowLeft,
+  FileText,
+  FileCode,
+  ClipboardList,
+  BookOpen,
+  TrendingUp,
+  Sparkles,
+  Download,
+  Trash2,
+  ExternalLink,
+} from "lucide-react";
 import type { Student, LatexDocument } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { LatexDocumentList } from "@/components/latex/latex-document-list";
 import { LatexGenerateDialog } from "@/components/latex/latex-generate-dialog";
 import { DossieDialog } from "@/components/latex/dossie-dialog";
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
+
+/** Workspace output file returned by the API */
+interface WorkspaceOutputFile {
+  id: string;
+  projectId: string;
+  projectName: string;
+  path: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/** Unified item for the sorted list */
+type DocItem =
+  | { kind: "latex"; doc: LatexDocument }
+  | { kind: "workspace"; file: WorkspaceOutputFile };
+
+function getItemDate(item: DocItem): string {
+  if (item.kind === "latex") {
+    return item.doc.generatedAt || item.doc.createdAt || "";
+  }
+  return item.file.updatedAt || item.file.createdAt || "";
+}
 
 export function LatexDocumentsPage() {
   const { id } = useParams<{ id: string }>();
   const [student, setStudent] = useState<Student | null>(null);
   const [documents, setDocuments] = useState<LatexDocument[]>([]);
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceOutputFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dossieDialogOpen, setDossieDialogOpen] = useState(false);
@@ -20,12 +59,14 @@ export function LatexDocumentsPage() {
 
   const fetchData = async () => {
     if (!id) return;
-    const [studentRes, docsRes] = await Promise.all([
+    const [studentRes, docsRes, wsRes] = await Promise.all([
       api.get<Student>(`/students/${id}`),
       api.get<LatexDocument[]>(`/latex-documents?studentId=${id}`),
+      api.get<WorkspaceOutputFile[]>(`/workspace/student/${id}/output-files`),
     ]);
     if (studentRes.success && studentRes.data) setStudent(studentRes.data);
     if (docsRes.success && docsRes.data) setDocuments(docsRes.data);
+    if (wsRes.success && wsRes.data) setWorkspaceFiles(wsRes.data);
     setLoading(false);
   };
 
@@ -52,9 +93,32 @@ export function LatexDocumentsPage() {
     }
   };
 
+  const handleDeleteWorkspaceFile = async (fileId: string) => {
+    if (!window.confirm("Tem certeza que deseja excluir este arquivo?")) return;
+    const res = await api.delete(`/workspace/files/${fileId}`);
+    if (res.success) {
+      setWorkspaceFiles((prev) => prev.filter((f) => f.id !== fileId));
+    }
+  };
+
+  const handleDownloadWorkspaceFile = async (file: WorkspaceOutputFile) => {
+    const token = api.getToken();
+    const res = await fetch(`${API_BASE}/workspace/files/${file.id}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.path.split("/").pop() || "download.pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
   const handleRegenerate = (docId: string) => {
     setRegeneratingId(docId);
-    // Optimistic update: immediately show "generating" status
     setDocuments((prev) =>
       prev.map((d) => (d.id === docId ? { ...d, status: "generating" as const } : d)),
     );
@@ -85,6 +149,16 @@ export function LatexDocumentsPage() {
     );
   }
 
+  // Build unified sorted list
+  const allItems: DocItem[] = [
+    ...documents.map((doc): DocItem => ({ kind: "latex", doc })),
+    ...workspaceFiles.map((file): DocItem => ({ kind: "workspace", file })),
+  ];
+  allItems.sort((a, b) => getItemDate(b).localeCompare(getItemDate(a)));
+
+  // Check if there's a workspace project for the "Abrir no Estúdio" button
+  const firstProjectId = workspaceFiles[0]?.projectId;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -100,7 +174,15 @@ export function LatexDocumentsPage() {
               <h1 className="text-xl sm:text-2xl font-bold">Documentos</h1>
               <p className="text-muted-foreground truncate">{student.name}</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
+              {firstProjectId && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to={`/estudio/${firstProjectId}`}>
+                    <Sparkles className="h-4 w-4 mr-1" />
+                    Abrir no Estúdio
+                  </Link>
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -152,14 +234,39 @@ export function LatexDocumentsPage() {
         PDFs com formatação profissional — tabelas, cabeçalhos e layout prontos para impressão.
       </p>
 
-      {/* List */}
-      <LatexDocumentList
-        documents={documents}
-        studentId={id!}
-        onDelete={handleDelete}
-        onRegenerate={handleRegenerate}
-        regeneratingId={regeneratingId}
-      />
+      {/* Unified sorted list */}
+      {allItems.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">
+            Nenhum documento gerado ainda.
+          </p>
+          <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">
+            Gere documentos LaTeX aqui ou use o Estúdio para criar PDFs com IA.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {allItems.map((item) =>
+            item.kind === "latex" ? (
+              <LatexDocCardInline
+                key={`latex-${item.doc.id}`}
+                document={item.doc}
+                studentId={id!}
+                onDelete={handleDelete}
+                onRegenerate={handleRegenerate}
+                regenerating={regeneratingId === item.doc.id}
+              />
+            ) : (
+              <WorkspaceFileCard
+                key={`ws-${item.file.id}`}
+                file={item.file}
+                onDelete={handleDeleteWorkspaceFile}
+                onDownload={handleDownloadWorkspaceFile}
+              />
+            )
+          )}
+        </div>
+      )}
 
       <LatexGenerateDialog
         open={dialogOpen}
@@ -177,5 +284,200 @@ export function LatexDocumentsPage() {
         documents={documents}
       />
     </div>
+  );
+}
+
+// ─────── Inline LaTeX Document Card (reuses existing logic) ───────
+
+import { RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { HEAT_LEVELS, SIZE_LEVELS } from "@aee-pro/shared";
+
+const statusConfig: Record<string, { label: string; variant: "success" | "warning" | "destructive" | "secondary" }> = {
+  completed: { label: "Concluído", variant: "success" },
+  generating: { label: "Gerando...", variant: "warning" },
+  compiling: { label: "Compilando...", variant: "warning" },
+  compile_error: { label: "Erro compilação", variant: "destructive" },
+  error: { label: "Erro", variant: "destructive" },
+};
+
+function LatexDocCardInline({
+  document,
+  studentId,
+  onDelete,
+  onRegenerate,
+  regenerating,
+}: {
+  document: LatexDocument;
+  studentId: string;
+  onDelete: (id: string) => void;
+  onRegenerate: (id: string) => void;
+  regenerating?: boolean;
+}) {
+  const status = statusConfig[document.status] ?? statusConfig.error;
+  const isProcessing = document.status === "generating" || document.status === "compiling";
+  const isBusy = regenerating || isProcessing;
+  const heatName = HEAT_LEVELS.find((h) => h.level === document.heatLevel)?.name ?? `${document.heatLevel}`;
+  const sizeName = SIZE_LEVELS.find((s) => s.level === document.sizeLevel)?.name ?? `${document.sizeLevel}`;
+  const dateSource = isProcessing ? document.createdAt : document.generatedAt;
+  const formattedDate = dateSource
+    ? new Date(dateSource).toLocaleDateString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-start gap-3">
+          <Link
+            to={`/alunos/${studentId}/documentos-latex/${document.id}`}
+            className="flex items-start gap-3 min-w-0 flex-1"
+          >
+            <div className="relative shrink-0 mt-0.5">
+              <FileText className={`h-5 w-5 ${document.status === "completed" ? "text-green-600" : isBusy ? "text-yellow-500" : "text-red-600"}`} />
+              {document.status === "compile_error" && (
+                <AlertTriangle className="h-3 w-3 text-destructive absolute -bottom-1 -right-1" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="font-medium break-words leading-snug">{document.title}</p>
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                <Badge variant={status.variant}>{status.label}</Badge>
+                <Badge variant="outline" className="text-[10px]">{heatName}</Badge>
+                <Badge variant="outline" className="text-[10px]">{sizeName}</Badge>
+              </div>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {formattedDate && (
+                  <span className="text-xs text-muted-foreground">{formattedDate}</span>
+                )}
+                {document.pdfSizeBytes && (
+                  <span className="text-xs text-muted-foreground">
+                    {Math.round(document.pdfSizeBytes / 1024)} KB
+                  </span>
+                )}
+              </div>
+            </div>
+          </Link>
+          <div className="flex gap-1 shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onRegenerate(document.id)}
+              disabled={isBusy}
+              title="Regenerar"
+            >
+              {isBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                if (window.confirm("Tem certeza que deseja excluir este documento LaTeX?")) {
+                  onDelete(document.id);
+                }
+              }}
+              title="Excluir"
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─────── Workspace File Card ───────
+
+function WorkspaceFileCard({
+  file,
+  onDelete,
+  onDownload,
+}: {
+  file: WorkspaceOutputFile;
+  onDelete: (id: string) => void;
+  onDownload: (file: WorkspaceOutputFile) => void;
+}) {
+  const fileName = file.path.split("/").pop() || file.path;
+  const formattedDate = (file.updatedAt || file.createdAt)
+    ? new Date(file.updatedAt || file.createdAt!).toLocaleDateString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
+  return (
+    <Card className="border-violet-200 dark:border-violet-800/50">
+      <CardContent className="p-4">
+        <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <div className="relative shrink-0 mt-0.5">
+              <FileText className="h-5 w-5 text-violet-600" />
+              <Sparkles className="h-3 w-3 text-violet-500 absolute -bottom-1 -right-1" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-medium break-words leading-snug">{fileName}</p>
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                <Badge variant="secondary" className="bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 text-[10px]">
+                  Estúdio
+                </Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  {file.projectName}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {formattedDate && (
+                  <span className="text-xs text-muted-foreground">{formattedDate}</span>
+                )}
+                {file.sizeBytes && (
+                  <span className="text-xs text-muted-foreground">
+                    {Math.round(file.sizeBytes / 1024)} KB
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-1 shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              asChild
+              title="Abrir no Estúdio"
+            >
+              <Link to={`/estudio/${file.projectId}`}>
+                <ExternalLink className="h-4 w-4" />
+              </Link>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onDownload(file)}
+              title="Baixar"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onDelete(file.id)}
+              title="Excluir"
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
