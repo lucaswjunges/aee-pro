@@ -21,12 +21,11 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PdfViewer } from "@/components/latex/pdf-viewer";
 import { LatexEditor } from "@/components/latex/latex-editor";
-import { LatexChat } from "@/components/latex/latex-chat";
 import { CompilationError } from "@/components/latex/compilation-error";
 import { api, API_BASE } from "@/lib/api";
 import { VOCE_SABIA } from "@/lib/voce-sabia";
 
-type ViewMode = "pdf" | "code" | "chat";
+type ViewMode = "pdf" | "code";
 
 function CompilationWarnings({ warnings }: { warnings: string[] }) {
   const [expanded, setExpanded] = useState(false);
@@ -74,6 +73,7 @@ export function LatexDocumentViewPage() {
   const [recompiling, setRecompiling] = useState(false);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [importingToEstudio, setImportingToEstudio] = useState(false);
   const voceSabia = useMemo(() => VOCE_SABIA[Math.floor(Math.random() * VOCE_SABIA.length)], []);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -210,23 +210,36 @@ export function LatexDocumentViewPage() {
     setRecompiling(false);
   };
 
-  const handleEditAI = async (instruction: string) => {
+  const handleOpenInEstudio = async () => {
     if (!docId) return;
-    const res = await api.post<LatexDocument>(`/latex-documents/${docId}/edit-ai`, {
-      instruction,
-    });
-    if (res.success && res.data) {
-      // Update state immediately — polling will track progress
-      setDocument(res.data);
-      setEditedSource(res.data.latexSource ?? "");
-      setViewMode("pdf");
-    } else {
-      throw new Error(res.error ?? "Erro na edição");
+    setImportingToEstudio(true);
+    try {
+      const res = await api.post<{ projectId: string; conversationId: string }>(
+        "/workspace/projects/import-latex",
+        { latexDocumentId: docId }
+      );
+      if (res.success && res.data) {
+        navigate(`/estudio/${res.data.projectId}`);
+      } else {
+        alert(res.error ?? "Erro ao importar para o Estúdio");
+      }
+    } catch {
+      alert("Erro ao conectar com o servidor.");
+    } finally {
+      setImportingToEstudio(false);
     }
   };
 
   const handleFixWithAI = async () => {
-    await handleEditAI("Corrija os erros de compilação LaTeX neste documento. Mantenha o conteúdo e estilo.");
+    if (!docId) return;
+    const res = await api.post<LatexDocument>(`/latex-documents/${docId}/edit-ai`, {
+      instruction: "Corrija os erros de compilação LaTeX neste documento. Mantenha o conteúdo e estilo.",
+    });
+    if (res.success && res.data) {
+      setDocument(res.data);
+      setEditedSource(res.data.latexSource ?? "");
+      setViewMode("pdf");
+    }
   };
 
   const handleRegenerate = async () => {
@@ -334,12 +347,17 @@ export function LatexDocumentViewPage() {
               )}
             </Button>
             <Button
-              variant={viewMode === "chat" ? "default" : "outline"}
+              variant="outline"
               size="sm"
-              onClick={() => setViewMode(viewMode === "chat" ? "pdf" : "chat")}
+              onClick={handleOpenInEstudio}
+              disabled={importingToEstudio}
             >
-              <Wand2 className="h-4 w-4 mr-1" />
-              {viewMode === "chat" ? "Ver PDF" : "Editar com IA"}
+              {importingToEstudio ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <Wand2 className="h-4 w-4 mr-1" />
+              )}
+              {importingToEstudio ? "Abrindo..." : "Editar com IA"}
             </Button>
             <Button
               variant="outline"
@@ -424,15 +442,6 @@ export function LatexDocumentViewPage() {
               {recompiling ? "Recompilando..." : "Salvar e Recompilar"}
             </Button>
           </div>
-        </div>
-      )}
-
-      {viewMode === "chat" && (
-        <div className="space-y-4">
-          {document.status === "completed" && (
-            <PdfViewer documentId={document.id} className="h-[40vh] w-full" />
-          )}
-          <LatexChat onSendInstruction={handleEditAI} />
         </div>
       )}
 
