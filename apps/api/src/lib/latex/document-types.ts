@@ -450,6 +450,97 @@ export const DOCUMENT_TYPE_CONFIGS: Record<string, DocumentTypeConfig> = {
 - Seção 10: Encaminhamentos pendentes (saúde, terapias, avaliações)
 - Documento completo e detalhado — é a "passagem de bastão" do aluno`,
   },
+  "plano-metas": {
+    slug: "plano-metas",
+    name: "Plano de Metas SMART",
+    instruction: `Gere um PLANO DE METAS SMART completo para AEE contendo:
+- Capa profissional com título "Plano de Metas SMART"
+- Dados de identificação do aluno em datacard
+- Seção de contextualização: diagnóstico, dificuldades e potencialidades
+- Explicação breve do método SMART (Específica, Mensurável, Alcançável, Relevante, com Prazo)
+- Organização por dimensão de desenvolvimento:
+  - Cognitivo, Linguagem, Motor, Social, Autonomia, Acadêmico
+- Para CADA dimensão, gerar tabela com colunas:
+  - Meta | Indicador de sucesso | Estratégia/Atividade | Prazo | Status inicial
+- As metas devem ser realistas e baseadas no perfil do aluno
+- Sugestões de atividades práticas para cada meta
+- Se heat >= 3: timeline TikZ visual mostrando as metas organizadas por prazo (curto/médio/longo)
+- Se heat >= 4: diagrama TikZ de conexões entre dimensões (como avanço em uma área impacta outra)
+- Seção de monitoramento: como e quando reavaliar cada meta
+- Seção de critérios de reavaliação e ajuste
+- Orientações para família e professores sobre como apoiar cada meta
+- Tom profissional e propositivo — foco em possibilidades, não apenas dificuldades`,
+  },
+  "grafico-evolucao": {
+    slug: "grafico-evolucao",
+    name: "Gráfico de Evolução do Aluno",
+    instruction: `Gere um documento de GRÁFICO DE EVOLUÇÃO DO ALUNO para AEE contendo:
+- Capa profissional com título "Relatório de Evolução do Aluno"
+- Dados de identificação do aluno em datacard
+- Período de avaliação
+- IMPORTANTE: Os dados de sessões serão fornecidos no contexto. Use-os fielmente.
+- Para cada dimensão avaliada (Cognitivo, Linguagem, Motor, Social, Autonomia, Acadêmico):
+  - Tabela de dados com data da sessão e rating (1-5) usando cores por nível
+  - Análise descritiva da tendência (melhora, estabilidade, retrocesso)
+  - Recomendações baseadas na tendência
+- Se heat >= 3: tabela-resumo visual com ícones (\\cmark, \\starmark) mostrando evolução
+- Se heat >= 4: diagrama TikZ timeline mostrando marcos de evolução
+- Seção de resumo geral: dimensões com maior avanço, dimensões que precisam de atenção
+- Recomendações consolidadas para o próximo período
+- Comparação entre início e fim do período para cada dimensão
+- Tom analítico e baseado em dados`,
+  },
+  "relatorio-semestral": {
+    slug: "relatorio-semestral",
+    name: "Relatório Semestral",
+    instruction: `Gere um RELATÓRIO SEMESTRAL do AEE contendo:
+- Capa profissional com título "Relatório Semestral do AEE"
+- Dados de identificação do aluno
+- Período/semestre de referência
+- IMPORTANTE: Os dados de sessões serão fornecidos no contexto. Use-os fielmente.
+- Seção 1: Panorama do semestre (total de sessões, frequência, tipos de atendimento)
+- Seção 2: Objetivos do semestre e status de cada um (tabela: objetivo, estratégia, resultado, status)
+- Seção 3: Evolução por área de desenvolvimento ao longo do semestre:
+  - Cognitivo, Linguagem, Motor, Social, Autonomia, Acadêmico
+  - Para cada: situação no início do semestre → meio → final
+- Seção 4: Atividades e estratégias mais eficazes em successbox
+- Seção 5: Dificuldades e desafios persistentes em alertbox
+- Seção 6: Articulação com sala regular e equipe escolar
+- Seção 7: Articulação com a família
+- Seção 8: Encaminhamentos externos realizados
+- Seção 9: Metas para o próximo semestre
+- Seção 10: Considerações finais
+- Se heat >= 3: tabela comparativa início × final do semestre por dimensão
+- Se heat >= 4: diagrama TikZ timeline do semestre com marcos relevantes
+- Tom profissional, analítico e propositivo`,
+  },
+  "relatorio-anual": {
+    slug: "relatorio-anual",
+    name: "Relatório Anual",
+    instruction: `Gere um RELATÓRIO ANUAL do AEE contendo:
+- Capa profissional com título "Relatório Anual do AEE"
+- Sumário (\\tableofcontents)
+- Dados de identificação do aluno em datacard
+- Ano letivo de referência
+- IMPORTANTE: Os dados de sessões serão fornecidos no contexto. Use-os fielmente.
+- Seção 1: Panorama do ano (total de sessões, frequência mensal, tipos de atendimento)
+- Seção 2: Histórico e diagnóstico (contextualização)
+- Seção 3: Objetivos anuais e avaliação de cada um (tabela detalhada)
+- Seção 4: Evolução anual por dimensão de desenvolvimento:
+  - Cognitivo, Linguagem, Motor, Social, Autonomia, Acadêmico
+  - Para cada: evolução trimestral/bimestral ao longo do ano
+- Seção 5: Conquistas do ano em successbox
+- Seção 6: Dificuldades que permanecem em alertbox
+- Seção 7: Estratégias mais eficazes (para continuidade)
+- Seção 8: Articulação com equipe escolar (reuniões, orientações)
+- Seção 9: Articulação com família (devolutivas, orientações)
+- Seção 10: Articulação com profissionais externos (terapias, médicos)
+- Seção 11: Recomendações para o próximo ano letivo
+- Seção 12: Parecer final do professor AEE
+- Se heat >= 3: tabela de evolução anual com cores por nível
+- Se heat >= 4: diagrama TikZ timeline anual com marcos e conquistas
+- Tom analítico, completo e propositivo — é o documento-síntese do ano`,
+  },
 };
 
 export function getDocumentTypeConfig(slug: string): DocumentTypeConfig | undefined {

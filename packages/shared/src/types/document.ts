@@ -70,6 +70,10 @@ export const LATEX_DOCUMENT_TYPES = [
   { slug: "declaracao-atendimento", name: "Declaração de Atendimento" },
   { slug: "encaminhamento-profissional", name: "Encaminhamento Profissional" },
   { slug: "relatorio-transicao", name: "Relatório de Transição de Etapa" },
+  { slug: "plano-metas", name: "Plano de Metas SMART" },
+  { slug: "grafico-evolucao", name: "Gráfico de Evolução do Aluno" },
+  { slug: "relatorio-semestral", name: "Relatório Semestral" },
+  { slug: "relatorio-anual", name: "Relatório Anual" },
 ] as const;
 
 export const HEAT_LEVELS = [
