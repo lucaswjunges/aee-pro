@@ -156,9 +156,6 @@ export function LatexDocumentsPage() {
   ];
   allItems.sort((a, b) => getItemDate(b).localeCompare(getItemDate(a)));
 
-  // Check if there's a workspace project for the "Abrir no Estúdio" button
-  const firstProjectId = workspaceFiles[0]?.projectId;
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -175,14 +172,6 @@ export function LatexDocumentsPage() {
               <p className="text-muted-foreground truncate">{student.name}</p>
             </div>
             <div className="flex gap-2 flex-wrap">
-              {firstProjectId && (
-                <Button variant="outline" size="sm" asChild>
-                  <Link to={`/estudio/${firstProjectId}`}>
-                    <Sparkles className="h-4 w-4 mr-1" />
-                    Abrir no Estúdio
-                  </Link>
-                </Button>
-              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -291,6 +280,7 @@ export function LatexDocumentsPage() {
 
 import { RefreshCw, Loader2, AlertTriangle } from "lucide-react";
 import { HEAT_LEVELS, SIZE_LEVELS } from "@aee-pro/shared";
+import { PdfIcon } from "@/components/ui/pdf-icon";
 
 const statusConfig: Record<string, { label: string; variant: "success" | "warning" | "destructive" | "secondary" }> = {
   completed: { label: "Concluído", variant: "success" },
@@ -338,7 +328,7 @@ function LatexDocCardInline({
             className="flex items-start gap-3 min-w-0 flex-1"
           >
             <div className="relative shrink-0 mt-0.5">
-              <FileText className={`h-5 w-5 ${document.status === "completed" ? "text-green-600" : isBusy ? "text-yellow-500" : "text-red-600"}`} />
+              <PdfIcon size="sm" />
               {document.status === "compile_error" && (
                 <AlertTriangle className="h-3 w-3 text-destructive absolute -bottom-1 -right-1" />
               )}
@@ -423,7 +413,7 @@ function WorkspaceFileCard({
         <div className="flex items-start gap-3">
           <div className="flex items-start gap-3 min-w-0 flex-1">
             <div className="relative shrink-0 mt-0.5">
-              <FileText className="h-5 w-5 text-violet-600" />
+              <PdfIcon size="sm" />
               <Sparkles className="h-3 w-3 text-violet-500 absolute -bottom-1 -right-1" />
             </div>
             <div className="min-w-0">

@@ -323,6 +323,21 @@ export function LatexDocumentViewPage() {
             </Button>
           </>
         )}
+        {!isProcessing && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleOpenInEstudio}
+            disabled={importingToEstudio}
+          >
+            {importingToEstudio ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Wand2 className="h-4 w-4 mr-1" />
+            )}
+            {importingToEstudio ? "Abrindo..." : "Abrir no Estúdio"}
+          </Button>
+        )}
         {document.latexSource && !isProcessing && (
           <>
             <Button variant="outline" size="sm" onClick={handleDownloadDocx} disabled={docxLoading}>
@@ -345,19 +360,6 @@ export function LatexDocumentViewPage() {
                   Editar Código
                 </>
               )}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleOpenInEstudio}
-              disabled={importingToEstudio}
-            >
-              {importingToEstudio ? (
-                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-              ) : (
-                <Wand2 className="h-4 w-4 mr-1" />
-              )}
-              {importingToEstudio ? "Abrindo..." : "Editar com IA"}
             </Button>
             <Button
               variant="outline"

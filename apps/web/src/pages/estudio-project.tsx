@@ -102,7 +102,7 @@ export function EstudioProjectPage() {
   // Mobile: tab-based layout
   if (isMobile) {
     return (
-      <div className="flex flex-col h-[calc(100vh-3.5rem-1.5rem)]  -mt-6 -mx-4">
+      <div className="fixed inset-0 top-[3.5rem] z-40 bg-background flex flex-col">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-2 border-b">
           <Link
@@ -185,7 +185,7 @@ export function EstudioProjectPage() {
 
   // Desktop: split layout
   return (
-    <div className="flex flex-col h-[calc(100vh-3.5rem-1.5rem)] -mt-6 -mx-4">
+    <div className="fixed inset-0 top-[3.5rem] z-40 bg-background flex flex-col">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-2 border-b">
         <Link
