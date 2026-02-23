@@ -349,6 +349,12 @@ workspaceFileRoutes.get("/files/:fileId/export/docx", async (c) => {
   const fileName = file.path.split("/").pop()?.replace(/\.\w+$/, "") || "document";
   const isLatex = file.mimeType === "text/x-latex" || file.path.endsWith(".tex");
 
+  console.log(`[export-docx] fileId=${fileId}, path=${file.path}, isLatex=${isLatex}, contentLength=${content.length}, r2Key=${file.r2Key}`);
+
+  if (!content.trim()) {
+    return c.json({ success: false, error: "Arquivo está vazio — nada para exportar" }, 400);
+  }
+
   let docxBytes: Uint8Array;
 
   if (isLatex) {

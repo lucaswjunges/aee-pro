@@ -110,20 +110,22 @@ export async function generateDocx(
   );
 
   // Subtitle with student name and date
-  paragraphs.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 400 },
-      children: [
-        new TextRun({
-          text: `Aluno(a): ${studentName} — ${date}`,
-          size: 22,
-          font: "Arial",
-          color: "666666",
-        }),
-      ],
-    })
-  );
+  if (studentName) {
+    paragraphs.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 400 },
+        children: [
+          new TextRun({
+            text: `Aluno(a): ${studentName} — ${date}`,
+            size: 22,
+            font: "Arial",
+            color: "666666",
+          }),
+        ],
+      })
+    );
+  }
 
   // Parse content into paragraphs
   const lines = content.split("\n");
@@ -179,7 +181,24 @@ export async function generateDocx(
     }
   }
 
+  console.log(`[export-docx] Generating DOCX: title="${title}", contentLength=${content.length}, paragraphs=${paragraphs.length}`);
+
   const doc = new Document({
+    creator: "AEE+ Pro",
+    title,
+    styles: {
+      default: {
+        document: {
+          run: {
+            size: 22,
+            font: "Arial",
+          },
+          paragraph: {
+            spacing: { after: 120 },
+          },
+        },
+      },
+    },
     sections: [
       {
         properties: {
@@ -197,7 +216,12 @@ export async function generateDocx(
     ],
   });
 
-  const blob = await Packer.toBlob(doc);
-  const arrayBuffer = await blob.arrayBuffer();
-  return new Uint8Array(arrayBuffer);
+  // Use toBase64String to avoid Buffer/Blob compatibility issues in CF Workers
+  const base64 = await Packer.toBase64String(doc);
+  const binaryStr = atob(base64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return bytes;
 }
