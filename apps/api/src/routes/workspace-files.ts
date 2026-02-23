@@ -379,8 +379,9 @@ workspaceFileRoutes.get("/files/:fileId/export/docx", async (c) => {
     }
 
     if (!pandocOk) {
-      const { generateDocx } = await import("../lib/export-docx");
-      docxBytes = await generateDocx(fileName, content, "", new Date().toLocaleDateString("pt-BR"));
+      const { generateDocx, latexToText } = await import("../lib/export-docx");
+      const textContent = latexToText(content);
+      docxBytes = await generateDocx(fileName, textContent, "", new Date().toLocaleDateString("pt-BR"));
     }
   } else {
     // Use the docx library for text/markdown content

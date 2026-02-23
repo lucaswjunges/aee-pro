@@ -7,6 +7,70 @@ import {
   AlignmentType,
 } from "docx";
 
+/**
+ * Convert LaTeX source to simplified text/markdown for DOCX generation.
+ * Strips preamble, converts \section/\subsection to markdown headings,
+ * removes common LaTeX commands, and preserves readable text.
+ */
+export function latexToText(latex: string): string {
+  // Remove everything before \begin{document}
+  const docStart = latex.indexOf("\\begin{document}");
+  const docEnd = latex.indexOf("\\end{document}");
+  let body = latex;
+  if (docStart !== -1) {
+    body = latex.slice(docStart + "\\begin{document}".length, docEnd !== -1 ? docEnd : undefined);
+  }
+
+  return (
+    body
+      // Convert sectioning commands to markdown headings
+      .replace(/\\section\*?\{([^}]+)\}/g, "# $1")
+      .replace(/\\subsection\*?\{([^}]+)\}/g, "## $1")
+      .replace(/\\subsubsection\*?\{([^}]+)\}/g, "### $1")
+      .replace(/\\paragraph\{([^}]+)\}/g, "**$1**")
+      // Convert text formatting
+      .replace(/\\textbf\{([^}]+)\}/g, "**$1**")
+      .replace(/\\textit\{([^}]+)\}/g, "$1")
+      .replace(/\\underline\{([^}]+)\}/g, "$1")
+      .replace(/\\emph\{([^}]+)\}/g, "$1")
+      // Convert lists
+      .replace(/\\begin\{itemize\}/g, "")
+      .replace(/\\end\{itemize\}/g, "")
+      .replace(/\\begin\{enumerate\}/g, "")
+      .replace(/\\end\{enumerate\}/g, "")
+      .replace(/\\item\s*/g, "• ")
+      // Convert common environments
+      .replace(/\\begin\{center\}/g, "")
+      .replace(/\\end\{center\}/g, "")
+      .replace(/\\begin\{quote\}/g, "")
+      .replace(/\\end\{quote\}/g, "")
+      .replace(/\\begin\{tabular\}[^}]*\}/g, "")
+      .replace(/\\end\{tabular\}/g, "")
+      // Remove spacing/layout commands
+      .replace(/\\vspace\*?\{[^}]*\}/g, "")
+      .replace(/\\hspace\*?\{[^}]*\}/g, "")
+      .replace(/\\noindent\s*/g, "")
+      .replace(/\\newpage/g, "")
+      .replace(/\\clearpage/g, "")
+      .replace(/\\\\(\[.*?\])?/g, "\n")
+      .replace(/\\hline/g, "")
+      .replace(/\\centering/g, "")
+      // Remove \maketitle and title/author/date commands
+      .replace(/\\maketitle/g, "")
+      .replace(/\\title\{([^}]+)\}/g, "# $1")
+      .replace(/\\author\{([^}]+)\}/g, "$1")
+      .replace(/\\date\{([^}]+)\}/g, "$1")
+      // Remove remaining unknown commands (but keep their content if in braces)
+      .replace(/\\[a-zA-Z]+\{([^}]*)\}/g, "$1")
+      .replace(/\\[a-zA-Z]+/g, "")
+      // Clean up table separators
+      .replace(/&/g, " | ")
+      // Clean up excess whitespace
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
+}
+
 /** Split text on **bold** markers and return TextRun array */
 function inlineRuns(text: string, size: number): TextRun[] {
   const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
@@ -133,5 +197,7 @@ export async function generateDocx(
     ],
   });
 
-  return Packer.toBuffer(doc) as Promise<Uint8Array>;
+  const blob = await Packer.toBlob(doc);
+  const arrayBuffer = await blob.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
 }
