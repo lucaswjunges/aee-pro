@@ -203,6 +203,7 @@ export function EstudioProjectPage() {
 
   // Desktop: split layout
   return (
+    <>
     <div className="fixed inset-0 top-[3.5rem] z-40 bg-background flex flex-col">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-2 border-b">
@@ -379,47 +380,49 @@ export function EstudioProjectPage() {
         )}
       </div>
 
-      {/* Fullscreen preview overlay */}
-      {fullscreenPreview && selectedFile && (previewUrl || previewText !== null) && (
-        <div className="fixed inset-0 z-50 bg-background flex flex-col">
-          <div className="flex items-center justify-between px-4 py-2 border-b">
-            <span className="text-sm font-medium truncate">
-              {selectedFile.path}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-3 text-xs gap-1.5"
-              onClick={() => setFullscreenPreview(false)}
-            >
-              <X className="h-4 w-4" />
-              Fechar
-            </Button>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            {selectedFile.mimeType === "application/pdf" && previewUrl ? (
-              <iframe
-                src={previewUrl}
-                className="w-full h-full border-0"
-                title="PDF Preview"
-              />
-            ) : selectedFile.mimeType.startsWith("image/") && previewUrl ? (
-              <div className="flex items-center justify-center h-full p-8 bg-muted/30">
-                <img
-                  src={previewUrl}
-                  alt={selectedFile.path}
-                  className="max-w-full max-h-full object-contain"
-                />
-              </div>
-            ) : previewText !== null ? (
-              <pre className="h-full overflow-auto p-6 text-sm font-mono bg-muted/30 whitespace-pre-wrap break-words leading-relaxed">
-                {previewText}
-              </pre>
-            ) : null}
-          </div>
-        </div>
-      )}
     </div>
+
+    {/* Fullscreen preview overlay — rendered outside z-40 container to sit above the site header */}
+    {fullscreenPreview && selectedFile && (previewUrl || previewText !== null) && (
+      <div className="fixed inset-0 z-[60] bg-background flex flex-col">
+        <div className="flex items-center justify-between px-4 py-2 border-b">
+          <span className="text-sm font-medium truncate">
+            {selectedFile.path}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-3 text-xs gap-1.5"
+            onClick={() => setFullscreenPreview(false)}
+          >
+            <X className="h-4 w-4" />
+            Fechar
+          </Button>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          {selectedFile.mimeType === "application/pdf" && previewUrl ? (
+            <iframe
+              src={previewUrl}
+              className="w-full h-full border-0"
+              title="PDF Preview"
+            />
+          ) : selectedFile.mimeType.startsWith("image/") && previewUrl ? (
+            <div className="flex items-center justify-center h-full p-8 bg-muted/30">
+              <img
+                src={previewUrl}
+                alt={selectedFile.path}
+                className="max-w-full max-h-full object-contain"
+              />
+            </div>
+          ) : previewText !== null ? (
+            <pre className="h-full overflow-auto p-6 text-sm font-mono bg-muted/30 whitespace-pre-wrap break-words leading-relaxed">
+              {previewText}
+            </pre>
+          ) : null}
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
