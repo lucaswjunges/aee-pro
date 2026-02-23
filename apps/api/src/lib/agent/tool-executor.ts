@@ -631,31 +631,55 @@ function guessMimeType(path: string): string {
 }
 
 /**
- * Fix \\ appearing right after sectioning commands.
- * This causes "There's no line here to end" LaTeX error.
+ * Fix \\ in positions where LaTeX has no line to end.
+ * This causes "! LaTeX Error: There's no line here to end."
  *
  * Patterns caught:
- *   \section{Title}\\         → \section{Title}
- *   \subsection{Title} \\     → \subsection{Title}
- *   \paragraph{Title}\\[5pt]  → \paragraph{Title}\vspace{5pt}
- *   Empty line followed by \\ → remove the \\
+ *   \section{Title with \textbf{bold}}\\  → \section{Title with \textbf{bold}}
+ *   \subsection{Title} \\[5pt]           → \subsection{Title}\vspace{5pt}
+ *   \begin{center}\\                     → \begin{center}
+ *   \maketitle\\                         → \maketitle
+ *   \centering\\                         → \centering
+ *   Empty line followed by \\            → remove the \\
+ *   \\ on an otherwise empty line        → remove
  */
 function fixLineBreakAfterSectioning(source: string): string {
-  // Remove \\ (with optional spacing arg) directly after sectioning commands
-  let result = source.replace(
-    /(\\(?:section|subsection|subsubsection|paragraph|subparagraph)\*?\{[^}]*\})\s*\\\\\s*(?:\[([^\]]*)\])?/g,
-    (_m, cmd: string, spacing?: string) => {
-      if (spacing) {
-        return `${cmd}\n\\vspace{${spacing}}`;
-      }
-      return cmd;
-    }
+  let result = source;
+
+  // 1. \\ after sectioning commands (handles nested braces like \textbf{})
+  //    Matches: \section*{...{...}...}\\  or  \section{...}\\[5pt]
+  const sectionCmds = "section|subsection|subsubsection|paragraph|subparagraph";
+  result = result.replace(
+    new RegExp(
+      `(\\\\(?:${sectionCmds})\\*?\\s*\\{(?:[^{}]*|\\{[^{}]*\\})*\\})\\s*\\\\\\\\\\s*(?:\\[([^\\]]*)\\])?`,
+      "g"
+    ),
+    (_m: string, cmd: string, spacing?: string) =>
+      spacing ? `${cmd}\n\\vspace{${spacing}}` : cmd
   );
 
-  // Remove \\ at the start of a paragraph (after a blank line)
-  result = result.replace(/\n\n\s*\\\\(\s*(?:\[[^\]]*\])?)\s*\n/g, "\n\n");
+  // 2. \\ right after \begin{...} (same line) for non-tabular environments
+  //    Skips tabular, longtable, array, align, equation, gather, split, cases, matrix
+  const safeEnvs = "tabular|tabularx|longtable|array|align|equation|gather|multline|split|cases|matrix|pmatrix|bmatrix|vmatrix|Bmatrix";
+  result = result.replace(
+    new RegExp(
+      `(\\\\begin\\{(?!(?:${safeEnvs})\\})[^}]+\\}(?:\\[[^\\]]*\\])?)\\s*\\\\\\\\\\s*(?:\\[[^\\]]*\\])?`,
+      "g"
+    ),
+    "$1"
+  );
 
-  // Remove \\ on an otherwise empty line
+  // 3. \\ right after commands that start fresh context (no preceding line to end)
+  const freshCmds = "maketitle|centering|raggedright|raggedleft|noindent|par";
+  result = result.replace(
+    new RegExp(`(\\\\(?:${freshCmds}))\\s*\\\\\\\\\\s*(?:\\[[^\\]]*\\])?`, "g"),
+    "$1"
+  );
+
+  // 4. \\ at the start of a paragraph (after a blank line)
+  result = result.replace(/\n\n\s*\\\\\s*(?:\[[^\]]*\])?\s*\n/g, "\n\n");
+
+  // 5. \\ on an otherwise empty line
   result = result.replace(/^\s*\\\\\s*(?:\[[^\]]*\])?\s*$/gm, "");
 
   return result;
