@@ -196,11 +196,42 @@ export function FileExplorer({
 
   const handleConnectDrive = async () => {
     const res = await api.get<{ url: string }>("/workspace/drive/auth-url");
-    if (res.success && res.data) {
-      window.location.href = res.data.url;
-    } else {
+    if (!res.success || !res.data) {
       alert(res.error || "Google Drive não está configurado no servidor.");
+      return;
     }
+
+    // Open OAuth in a centered popup window
+    const w = 500;
+    const h = 600;
+    const left = window.screenX + (window.outerWidth - w) / 2;
+    const top = window.screenY + (window.outerHeight - h) / 2;
+    const popup = window.open(
+      res.data.url,
+      "google-drive-oauth",
+      `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`
+    );
+
+    // Listen for the callback message from the popup
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === "google-drive-connected") {
+        setDriveStatus({ connected: true });
+        window.removeEventListener("message", onMessage);
+        popup?.close();
+      } else if (event.data?.type === "google-drive-error") {
+        alert(event.data.error || "Erro ao conectar Google Drive.");
+        window.removeEventListener("message", onMessage);
+      }
+    };
+    window.addEventListener("message", onMessage);
+
+    // Fallback: clean up if popup is closed without completing
+    const checkClosed = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(checkClosed);
+        window.removeEventListener("message", onMessage);
+      }
+    }, 500);
   };
 
   const handleSaveToDrive = async (file: WorkspaceFile, e: React.MouseEvent) => {
