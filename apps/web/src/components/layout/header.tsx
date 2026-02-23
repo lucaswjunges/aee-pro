@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { LogOut, Users, LayoutDashboard, Settings, Menu, X, FileText } from "lucide-react";
+import { LogOut, Users, LayoutDashboard, Settings, Menu, X, FileText, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "./theme-toggle";
 import { useAuth } from "@/lib/auth";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/", label: "Painel", icon: LayoutDashboard },
+  { to: "/estudio", label: "Estúdio", icon: Sparkles },
   { to: "/alunos", label: "Alunos", icon: Users },
   { to: "/prompts", label: "Prompts", icon: FileText },
   { to: "/configuracoes", label: "Configurações", icon: Settings },

@@ -10,6 +10,10 @@ import { latexDocumentRoutes } from "./routes/latex-documents";
 import { imageRoutes } from "./routes/images";
 import { aeeSessionRoutes } from "./routes/aee-sessions";
 import { evolutionRoutes } from "./routes/evolution";
+import { workspaceProjectRoutes } from "./routes/workspace-projects";
+import { workspaceFileRoutes } from "./routes/workspace-files";
+import { workspaceChatRoutes } from "./routes/workspace-chat";
+import { workspaceDriveRoutes } from "./routes/workspace-drive";
 
 export type Env = {
   Bindings: {
@@ -20,6 +24,8 @@ export type Env = {
     LATEX_COMPILER_TOKEN: string;
     RESEND_API_KEY: string;
     FRONTEND_URL: string;
+    GOOGLE_CLIENT_ID?: string;
+    GOOGLE_CLIENT_SECRET?: string;
   };
 };
 
@@ -48,6 +54,10 @@ app.route("/api/latex-documents", latexDocumentRoutes);
 app.route("/api/images", imageRoutes);
 app.route("/api/aee-sessions", aeeSessionRoutes);
 app.route("/api/evolution", evolutionRoutes);
+app.route("/api/workspace/projects", workspaceProjectRoutes);
+app.route("/api/workspace", workspaceFileRoutes);
+app.route("/api/workspace", workspaceChatRoutes);
+app.route("/api/workspace", workspaceDriveRoutes);
 
 export default {
   fetch: app.fetch.bind(app),

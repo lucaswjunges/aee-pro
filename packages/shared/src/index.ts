@@ -8,3 +8,4 @@ export * from "./schemas/student";
 export * from "./schemas/settings";
 export * from "./types/session";
 export * from "./schemas/session";
+export * from "./types/workspace";

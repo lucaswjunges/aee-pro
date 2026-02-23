@@ -8,3 +8,8 @@ export * from "./latex-documents";
 export * from "./user-images";
 export * from "./password-reset-tokens";
 export * from "./aee-sessions";
+export * from "./workspace-projects";
+export * from "./workspace-files";
+export * from "./workspace-conversations";
+export * from "./workspace-messages";
+export * from "./workspace-file-versions";

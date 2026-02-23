@@ -16,6 +16,16 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:8787",
         changeOrigin: true,
+        // Disable buffering for SSE streams — critical for real-time tool call updates
+        configure: (proxy) => {
+          proxy.on("proxyRes", (proxyRes) => {
+            if (proxyRes.headers["content-type"]?.includes("text/event-stream")) {
+              // Disable response buffering
+              proxyRes.headers["x-accel-buffering"] = "no";
+              proxyRes.headers["cache-control"] = "no-cache, no-transform";
+            }
+          });
+        },
       },
     },
   },

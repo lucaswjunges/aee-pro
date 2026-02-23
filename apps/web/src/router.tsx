@@ -21,6 +21,10 @@ import { AllDocumentsPage } from "@/pages/all-documents";
 import { NotFoundPage } from "@/pages/not-found";
 import { ForgotPasswordPage } from "@/pages/forgot-password";
 import { ResetPasswordPage } from "@/pages/reset-password";
+import { EstudioPage } from "@/pages/estudio";
+import { EstudioProjectPage } from "@/pages/estudio-project";
+import { GoogleCallbackPage } from "@/pages/google-callback";
+import { StudentEstudioRedirect } from "@/pages/student-estudio-redirect";
 
 function GuestRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -83,6 +87,9 @@ export function AppRouter() {
         <Route path="alunos/:id/documentos/:docId" element={<DocumentViewPage />} />
         <Route path="alunos/:id/documentos-latex" element={<LatexDocumentsPage />} />
         <Route path="alunos/:id/documentos-latex/:docId" element={<LatexDocumentViewPage />} />
+        <Route path="estudio" element={<EstudioPage />} />
+        <Route path="estudio/:id" element={<EstudioProjectPage />} />
+        <Route path="estudio/google-callback" element={<GoogleCallbackPage />} />
         <Route path="prompts" element={<PromptsPage />} />
         <Route path="configuracoes" element={<SettingsPage />} />
       </Route>
