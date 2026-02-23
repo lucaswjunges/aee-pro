@@ -20,6 +20,12 @@ export const aeeSessions = sqliteTable("aee_sessions", {
   studentResponse: text("student_response"),
   observations: text("observations"),
   nextSteps: text("next_steps"),
+  ratingCognitive: integer("rating_cognitive"),
+  ratingLinguistic: integer("rating_linguistic"),
+  ratingMotor: integer("rating_motor"),
+  ratingSocial: integer("rating_social"),
+  ratingAutonomy: integer("rating_autonomy"),
+  ratingAcademic: integer("rating_academic"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

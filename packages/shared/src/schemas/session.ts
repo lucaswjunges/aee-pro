@@ -14,6 +14,12 @@ export const aeeSessionSchema = z.object({
   studentResponse: z.string().nullable().optional(),
   observations: z.string().nullable().optional(),
   nextSteps: z.string().nullable().optional(),
+  ratingCognitive: z.number().int().min(1).max(5).nullable().optional(),
+  ratingLinguistic: z.number().int().min(1).max(5).nullable().optional(),
+  ratingMotor: z.number().int().min(1).max(5).nullable().optional(),
+  ratingSocial: z.number().int().min(1).max(5).nullable().optional(),
+  ratingAutonomy: z.number().int().min(1).max(5).nullable().optional(),
+  ratingAcademic: z.number().int().min(1).max(5).nullable().optional(),
 });
 
 export const aeeSessionUpdateSchema = aeeSessionSchema.partial();

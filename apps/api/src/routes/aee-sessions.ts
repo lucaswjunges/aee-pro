@@ -86,6 +86,12 @@ aeeSessionRoutes.post("/", async (c) => {
     studentResponse: parsed.data.studentResponse ?? null,
     observations: parsed.data.observations ?? null,
     nextSteps: parsed.data.nextSteps ?? null,
+    ratingCognitive: parsed.data.ratingCognitive ?? null,
+    ratingLinguistic: parsed.data.ratingLinguistic ?? null,
+    ratingMotor: parsed.data.ratingMotor ?? null,
+    ratingSocial: parsed.data.ratingSocial ?? null,
+    ratingAutonomy: parsed.data.ratingAutonomy ?? null,
+    ratingAcademic: parsed.data.ratingAcademic ?? null,
     createdAt: now,
     updatedAt: now,
   };

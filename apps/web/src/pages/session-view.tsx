@@ -14,9 +14,10 @@ import {
   ClipboardList,
   FileText,
   FileCode,
+  TrendingUp,
 } from "lucide-react";
 import type { Student, AeeSession } from "@aee-pro/shared";
-import { SESSION_TYPES } from "@aee-pro/shared";
+import { SESSION_TYPES, DIMENSION_RATINGS, RATING_SCALE } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -129,24 +130,31 @@ export function SessionViewPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex border-b">
+      <div className="flex border-b overflow-x-auto">
         <Link
           to={`/alunos/${id}/sessoes`}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 border-primary text-primary"
+          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 border-primary text-primary whitespace-nowrap"
         >
           <ClipboardList className="h-4 w-4" />
           Sessões
         </Link>
         <Link
+          to={`/alunos/${id}/evolucao`}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent whitespace-nowrap"
+        >
+          <TrendingUp className="h-4 w-4" />
+          Evolução
+        </Link>
+        <Link
           to={`/alunos/${id}/documentos`}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent"
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent whitespace-nowrap"
         >
           <FileText className="h-4 w-4" />
           Documentos Texto
         </Link>
         <Link
           to={`/alunos/${id}/documentos-latex`}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent"
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent whitespace-nowrap"
         >
           <FileCode className="h-4 w-4" />
           Documentos LaTeX
@@ -181,6 +189,29 @@ export function SessionViewPage() {
           )}
         </div>
       </div>
+
+      {/* Dimension ratings */}
+      {DIMENSION_RATINGS.some((d) => session[d.key] != null) && (
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <p className="text-sm font-medium text-muted-foreground">Avaliação por Dimensão</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {DIMENSION_RATINGS.map((dim) => {
+              const val = session[dim.key];
+              if (val == null) return null;
+              const scale = RATING_SCALE.find((s) => s.value === val);
+              return (
+                <div key={dim.key} className="flex items-center gap-2">
+                  <span className={`inline-block h-3 w-3 rounded-full ${scale?.color ?? "bg-gray-400"}`} />
+                  <span className="text-sm">
+                    <span className="font-medium">{dim.label}:</span>{" "}
+                    {val} — {scale?.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Content sections */}
       {sections.map(({ icon: Icon, label, content }) => {

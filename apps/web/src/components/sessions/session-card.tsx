@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { Pencil, Trash2, Clock, Calendar } from "lucide-react";
 import type { AeeSession } from "@aee-pro/shared";
-import { SESSION_TYPES } from "@aee-pro/shared";
+import { SESSION_TYPES, DIMENSION_RATINGS, RATING_SCALE } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -96,6 +96,26 @@ export function SessionCard({ session, onEdit, onDelete }: SessionCardProps) {
         <div className="text-sm">
           <span className="font-medium text-muted-foreground">Resposta do aluno: </span>
           <span className="line-clamp-2">{session.studentResponse}</span>
+        </div>
+      )}
+
+      {/* Dimension rating badges */}
+      {DIMENSION_RATINGS.some((d) => session[d.key] != null) && (
+        <div className="flex flex-wrap gap-1.5">
+          {DIMENSION_RATINGS.map((dim) => {
+            const val = session[dim.key];
+            if (val == null) return null;
+            const scale = RATING_SCALE.find((s) => s.value === val);
+            return (
+              <span
+                key={dim.key}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white ${scale?.color ?? "bg-gray-400"}`}
+                title={`${dim.label}: ${scale?.label ?? val}`}
+              >
+                {dim.label.slice(0, 3)} {val}
+              </span>
+            );
+          })}
         </div>
       )}
     </div>

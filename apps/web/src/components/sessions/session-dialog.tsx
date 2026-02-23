@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { AeeSession } from "@aee-pro/shared";
-import { SESSION_TYPES } from "@aee-pro/shared";
+import type { AeeSession, DimensionRatingKey } from "@aee-pro/shared";
+import { SESSION_TYPES, DIMENSION_RATINGS, RATING_SCALE } from "@aee-pro/shared";
 import { Dialog, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,8 @@ interface SessionDialogProps {
   studentId: string;
   session?: AeeSession | null;
   onSaved: () => void;
+  existingSessions?: AeeSession[];
+  onReportSuggestion?: (periodType: string, count: number) => void;
 }
 
 function todayISO() {
@@ -26,12 +28,44 @@ function nowTime() {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+function checkReportThreshold(
+  existingSessions: AeeSession[],
+  newSessionDate: string,
+): { periodType: string; count: number } | null {
+  const now = new Date(newSessionDate);
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  // Count sessions in current bimester
+  const biMonth = Math.floor(month / 2) * 2;
+  const biStart = new Date(year, biMonth, 1).toISOString().slice(0, 10);
+  const biEnd = new Date(year, biMonth + 2, 0).toISOString().slice(0, 10);
+  const biCount = existingSessions.filter(
+    (s) => s.sessionDate >= biStart && s.sessionDate <= biEnd,
+  ).length + 1; // +1 for the new session being saved
+
+  if (biCount >= 8) return { periodType: "bimestral", count: biCount };
+
+  // Count sessions in current month
+  const monthStart = new Date(year, month, 1).toISOString().slice(0, 10);
+  const monthEnd = new Date(year, month + 1, 0).toISOString().slice(0, 10);
+  const monthCount = existingSessions.filter(
+    (s) => s.sessionDate >= monthStart && s.sessionDate <= monthEnd,
+  ).length + 1;
+
+  if (monthCount >= 4) return { periodType: "mensal", count: monthCount };
+
+  return null;
+}
+
 export function SessionDialog({
   open,
   onOpenChange,
   studentId,
   session,
   onSaved,
+  existingSessions,
+  onReportSuggestion,
 }: SessionDialogProps) {
   const isEditing = !!session;
 
@@ -45,6 +79,14 @@ export function SessionDialog({
   const [studentResponse, setStudentResponse] = useState("");
   const [observations, setObservations] = useState("");
   const [nextSteps, setNextSteps] = useState("");
+  const [ratings, setRatings] = useState<Record<DimensionRatingKey, number | null>>({
+    ratingCognitive: null,
+    ratingLinguistic: null,
+    ratingMotor: null,
+    ratingSocial: null,
+    ratingAutonomy: null,
+    ratingAcademic: null,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +103,14 @@ export function SessionDialog({
         setStudentResponse(session.studentResponse ?? "");
         setObservations(session.observations ?? "");
         setNextSteps(session.nextSteps ?? "");
+        setRatings({
+          ratingCognitive: session.ratingCognitive ?? null,
+          ratingLinguistic: session.ratingLinguistic ?? null,
+          ratingMotor: session.ratingMotor ?? null,
+          ratingSocial: session.ratingSocial ?? null,
+          ratingAutonomy: session.ratingAutonomy ?? null,
+          ratingAcademic: session.ratingAcademic ?? null,
+        });
       } else {
         setSessionDate(todayISO());
         setStartTime(nowTime());
@@ -72,6 +122,14 @@ export function SessionDialog({
         setStudentResponse("");
         setObservations("");
         setNextSteps("");
+        setRatings({
+          ratingCognitive: null,
+          ratingLinguistic: null,
+          ratingMotor: null,
+          ratingSocial: null,
+          ratingAutonomy: null,
+          ratingAcademic: null,
+        });
       }
       setError(null);
     }
@@ -94,6 +152,12 @@ export function SessionDialog({
       studentResponse: studentResponse || null,
       observations: observations || null,
       nextSteps: nextSteps || null,
+      ratingCognitive: ratings.ratingCognitive,
+      ratingLinguistic: ratings.ratingLinguistic,
+      ratingMotor: ratings.ratingMotor,
+      ratingSocial: ratings.ratingSocial,
+      ratingAutonomy: ratings.ratingAutonomy,
+      ratingAcademic: ratings.ratingAcademic,
     };
 
     const res = isEditing
@@ -105,6 +169,14 @@ export function SessionDialog({
     if (res.success) {
       onSaved();
       onOpenChange(false);
+      // Check if report suggestion should be shown (only for new sessions)
+      if (!isEditing && existingSessions && onReportSuggestion) {
+        const suggestion = checkReportThreshold(existingSessions, sessionDate);
+        if (suggestion) {
+          // Delay slightly so the dialog closes first
+          setTimeout(() => onReportSuggestion(suggestion.periodType, suggestion.count), 300);
+        }
+      }
     } else {
       setError(res.error ?? "Erro ao salvar sessão");
     }
@@ -243,6 +315,33 @@ export function SessionDialog({
             placeholder="O que planejar para a próxima sessão..."
             rows={2}
           />
+        </div>
+
+        {/* Avaliação por Dimensão */}
+        <div className="space-y-3 rounded-lg border p-4">
+          <p className="text-sm font-medium">Avaliação por Dimensão <span className="text-muted-foreground font-normal">(opcional)</span></p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {DIMENSION_RATINGS.map((dim) => (
+              <div key={dim.key} className="space-y-1">
+                <label className="text-sm text-muted-foreground">{dim.label}</label>
+                <select
+                  value={ratings[dim.key] ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value === "" ? null : Number(e.target.value);
+                    setRatings((prev) => ({ ...prev, [dim.key]: val }));
+                  }}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:text-sm"
+                >
+                  <option value="">—</option>
+                  {RATING_SCALE.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.value} — {r.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
