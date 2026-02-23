@@ -9,6 +9,7 @@ import {
 import { createDb } from "../db/index";
 import { authMiddleware } from "../middleware/auth";
 import type { Env } from "../index";
+import { TEMPLATE_FILES } from "../lib/templates/index";
 
 type WsEnv = Env & { Variables: { userId: string } };
 
@@ -82,6 +83,7 @@ workspaceProjectRoutes.post("/", async (c) => {
     name: string;
     description?: string;
     studentId?: string;
+    templateId?: string;
   }>();
 
   if (!body.name?.trim()) {
@@ -112,6 +114,32 @@ workspaceProjectRoutes.post("/", async (c) => {
     createdAt: now,
     updatedAt: now,
   });
+
+  // Seed template files if templateId provided
+  if (body.templateId) {
+    const templateFiles = TEMPLATE_FILES[body.templateId];
+    if (templateFiles) {
+      for (const tf of templateFiles) {
+        const r2Key = `workspace/${userId}/${id}/${tf.path}`;
+        const bytes = new TextEncoder().encode(tf.content);
+        await c.env.R2.put(r2Key, bytes, {
+          httpMetadata: { contentType: tf.mimeType },
+        });
+        await db.insert(workspaceFiles).values({
+          id: crypto.randomUUID(),
+          projectId: id,
+          userId,
+          path: tf.path,
+          mimeType: tf.mimeType,
+          sizeBytes: bytes.byteLength,
+          r2Key,
+          isOutput: 0,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+  }
 
   const project = await db
     .select()

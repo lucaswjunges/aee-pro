@@ -61,7 +61,7 @@ const TEMPLATES: Template[] = [
     description: "Plano Educacional Individualizado com metas e estratégias",
     icon: FileText,
     color: "violet",
-    prompt: "Gere um PEI completo para o aluno vinculado a este projeto. Inclua: dados do aluno, diagnóstico, objetivos gerais e específicos, metas SMART, estratégias pedagógicas, adaptações curriculares, recursos necessários, cronograma e critérios de avaliação. Use formato profissional com seções bem definidas.",
+    prompt: "Use o arquivo pei.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste metas, estratégias e cronograma conforme o diagnóstico e necessidades específicas do aluno.",
   },
   {
     id: "anamnese",
@@ -69,7 +69,7 @@ const TEMPLATES: Template[] = [
     description: "Avaliação inicial completa do aluno",
     icon: ClipboardList,
     color: "blue",
-    prompt: "Crie uma anamnese detalhada profissional para o aluno vinculado. Inclua: identificação, histórico gestacional e de desenvolvimento, marcos motores e de linguagem, histórico escolar, aspectos familiares e sociais, comportamento, saúde, medicações, terapias, e observações relevantes. Formato formal para arquivo escolar.",
+    prompt: "Use o arquivo anamnese.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Preencha histórico, desenvolvimento e dados familiares conforme as informações disponíveis.",
   },
   {
     id: "estudo-de-caso",
@@ -77,7 +77,7 @@ const TEMPLATES: Template[] = [
     description: "Análise aprofundada com fundamentação teórica",
     icon: BookOpen,
     color: "indigo",
-    prompt: "Elabore um estudo de caso completo sobre o aluno vinculado. Inclua: introdução com contextualização, fundamentação teórica sobre o diagnóstico, metodologia de avaliação, análise do desenvolvimento por dimensões (cognitivo, motor, social, linguagem), discussão dos resultados, propostas de intervenção e referências bibliográficas.",
+    prompt: "Use o arquivo estudo-de-caso.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Adapte a fundamentação teórica, análise e estratégias ao diagnóstico do aluno.",
   },
   {
     id: "parecer-descritivo",
@@ -85,7 +85,7 @@ const TEMPLATES: Template[] = [
     description: "Parecer pedagógico com análise por dimensão",
     icon: MessageSquareText,
     color: "cyan",
-    prompt: "Gere um parecer descritivo completo do aluno vinculado. Analise cada dimensão do desenvolvimento: cognitiva, motora, socioafetiva, linguagem e comunicação, autonomia e vida diária. Para cada dimensão, descreva o nível atual, avanços observados, dificuldades persistentes e estratégias recomendadas. Conclua com uma síntese geral e encaminhamentos.",
+    prompt: "Use o arquivo parecer.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste a análise de cada dimensão do desenvolvimento conforme as observações do aluno.",
   },
   {
     id: "jogo-educativo",
@@ -93,7 +93,7 @@ const TEMPLATES: Template[] = [
     description: "Jogo pedagógico adaptado com regras e peças",
     icon: Puzzle,
     color: "emerald",
-    prompt: "Crie um jogo educativo imprimível adaptado para o aluno vinculado. Inclua: nome do jogo, objetivo pedagógico, materiais necessários, regras detalhadas, variações por nível de dificuldade e as peças/tabuleiro em LaTeX prontos para impressão. O jogo deve trabalhar habilidades específicas relacionadas ao diagnóstico do aluno.",
+    prompt: "Use o arquivo jogo.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Adapte o jogo às habilidades e necessidades específicas do aluno, ajustando níveis de dificuldade.",
   },
   {
     id: "kit-atividades",
@@ -101,7 +101,7 @@ const TEMPLATES: Template[] = [
     description: "Conjunto de atividades adaptadas por nível",
     icon: Package,
     color: "green",
-    prompt: "Crie um kit com 5 atividades adaptadas para o aluno vinculado. Cada atividade deve ter: título, objetivo, materiais, passo a passo, adaptações por nível (básico, intermediário, avançado), critérios de avaliação e dicas para o professor. As atividades devem ser progressivas e trabalhar diferentes habilidades.",
+    prompt: "Use o arquivo atividades.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Adapte as atividades ao nível e diagnóstico do aluno.",
   },
   {
     id: "material-aula",
@@ -109,7 +109,7 @@ const TEMPLATES: Template[] = [
     description: "Sequência didática com adaptações inclusivas",
     icon: GraduationCap,
     color: "amber",
-    prompt: "Crie um material de aula adaptado para incluir o aluno vinculado na turma regular. Inclua: tema da aula, objetivos (gerais e específicos para o aluno), conteúdo adaptado, sequência didática com momentos de inclusão, recursos visuais, atividades diferenciadas e avaliação adaptada.",
+    prompt: "Use o arquivo aula.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste a sequência didática e adaptações conforme as necessidades do aluno.",
   },
   {
     id: "rotina-visual",
@@ -117,7 +117,7 @@ const TEMPLATES: Template[] = [
     description: "Quadro de rotina visual com imagens descritivas",
     icon: CalendarClock,
     color: "orange",
-    prompt: "Gere uma rotina visual detalhada para o aluno vinculado. Crie um quadro de rotina com: horários, atividades do dia (chegada, roda, atividades, lanche, parque, saída), descrição visual de cada momento, dicas de transição entre atividades e adaptações sensoriais. Formato em LaTeX pronto para imprimir e plastificar.",
+    prompt: "Use o arquivo rotina.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste horários, atividades e adaptações sensoriais conforme a rotina do aluno.",
   },
   {
     id: "relatorio-evolucao",
@@ -125,7 +125,7 @@ const TEMPLATES: Template[] = [
     description: "Relatório periódico com análise de progresso",
     icon: TrendingUp,
     color: "rose",
-    prompt: "Gere um relatório de evolução do aluno vinculado referente ao período atual. Compare o desenvolvimento nas dimensões cognitiva, motora, social, linguagem e autonomia. Para cada área, indique: objetivos trabalhados, estratégias utilizadas, avanços observados, dificuldades persistentes e metas para o próximo período.",
+    prompt: "Use o arquivo relatorio.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Atualize os dados de evolução, gráficos e metas conforme o progresso observado.",
   },
   {
     id: "relatorio-familia",
@@ -133,7 +133,7 @@ const TEMPLATES: Template[] = [
     description: "Devolutiva acessível para pais e responsáveis",
     icon: Heart,
     color: "pink",
-    prompt: "Crie um relatório para a família do aluno vinculado. Use linguagem acessível e acolhedora (evite jargões técnicos). Descreva: como o aluno está na escola, o que ele tem aprendido, suas conquistas recentes, no que estamos trabalhando, como a família pode ajudar em casa e próximos passos. Tom positivo e encorajador.",
+    prompt: "Use o arquivo relatorio-familia.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste as conquistas e orientações mantendo linguagem acolhedora e acessível.",
   },
   {
     id: "apresentacao-reuniao",
@@ -141,7 +141,7 @@ const TEMPLATES: Template[] = [
     description: "Slides profissionais para reunião pedagógica",
     icon: Presentation,
     color: "fuchsia",
-    prompt: "Crie uma apresentação em LaTeX/Beamer profissional para reunião pedagógica sobre o aluno vinculado. Slides: 1) Capa, 2) Dados do aluno, 3) Diagnóstico e características, 4) Objetivos do PEI, 5) Estratégias utilizadas, 6) Evolução por dimensão, 7) Próximos passos, 8) Orientações para a equipe. Design limpo e visual.",
+    prompt: "Use o arquivo apresentacao.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Atualize os slides com dados reais do aluno e sua evolução.",
   },
   {
     id: "tcc-aee",
@@ -149,7 +149,7 @@ const TEMPLATES: Template[] = [
     description: "Trabalho acadêmico com estrutura ABNT",
     icon: FileStack,
     color: "slate",
-    prompt: "Gere um TCC completo sobre AEE em LaTeX com formatação ABNT. Estrutura: capa, folha de rosto, resumo, abstract, sumário, introdução (justificativa, objetivos, metodologia), referencial teórico (legislação inclusiva, AEE, papel do professor especializado), desenvolvimento (estudo de caso do aluno vinculado), considerações finais e referências bibliográficas atualizadas.",
+    prompt: "Use o arquivo tcc.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Desenvolva o estudo de caso com base no diagnóstico e atendimento do aluno.",
   },
 ];
 
@@ -224,7 +224,7 @@ export function EstudioPage() {
     try {
       const res = await api.post<WorkspaceProject & { conversationId: string }>(
         "/workspace/projects",
-        { name: template.name }
+        { name: template.name, templateId: template.id }
       );
       if (res.success && res.data) {
         sessionStorage.setItem(
