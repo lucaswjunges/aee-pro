@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   Bot,
   User,
@@ -16,6 +16,9 @@ import {
   Database,
   Cpu,
   BookOpen,
+  Undo2,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,7 +28,7 @@ interface RawSSEEvent {
   content?: string;
   tool?: string;
   toolInput?: Record<string, unknown>;
-  result?: { success?: boolean; output?: string; error?: string; filePath?: string };
+  result?: { success?: boolean; output?: string; error?: string; filePath?: string; fileId?: string; versionId?: string; oldText?: string; newText?: string };
   agentId?: string;
   agentTask?: string;
 }
@@ -38,6 +41,10 @@ interface ChatMessageProps {
   isThinking?: boolean;
   /** True only for the currently-streaming message (tools may still be in-flight) */
   liveStreaming?: boolean;
+  /** When false, file-modifying tools show review UI with Accept/Undo */
+  autoAccept?: boolean;
+  /** Callback to undo a file modification by restoring a previous version */
+  onUndoFile?: (fileId: string, versionId: string) => Promise<void>;
 }
 
 export function ChatMessage({
@@ -47,6 +54,8 @@ export function ChatMessage({
   isStreaming,
   isThinking,
   liveStreaming,
+  autoAccept,
+  onUndoFile,
 }: ChatMessageProps) {
   const isUser = role === "user";
 
@@ -54,6 +63,9 @@ export function ChatMessage({
   // For stored/finalized messages (not live streaming), force all pairs as completed
   // to avoid showing "Executando..." on old messages that may lack tool_result events.
   const toolPairs = groupToolEvents(toolCalls || [], !liveStreaming);
+
+  // Messages loaded from history default to accepted (no review buttons)
+  const isFromHistory = !liveStreaming && !isStreaming;
 
   return (
     <div
@@ -96,7 +108,12 @@ export function ChatMessage({
 
         {/* Tool calls (after text content) */}
         {toolPairs.length > 0 && (
-          <ToolCallGroup pairs={toolPairs} />
+          <ToolCallGroup
+            pairs={toolPairs}
+            autoAccept={autoAccept}
+            onUndoFile={onUndoFile}
+            isFromHistory={isFromHistory}
+          />
         )}
 
         {/* Thinking indicator (AI processing after tool results) */}
@@ -126,7 +143,7 @@ interface ToolPair {
   type: "tool" | "agent";
   tool?: string;
   toolInput?: Record<string, unknown>;
-  result?: { success?: boolean; output?: string; error?: string; filePath?: string };
+  result?: { success?: boolean; output?: string; error?: string; filePath?: string; fileId?: string; versionId?: string; oldText?: string; newText?: string };
   agentTask?: string;
   agentResult?: string;
   completed: boolean;
@@ -200,8 +217,12 @@ function groupToolEvents(events: RawSSEEvent[], forceComplete = false): ToolPair
   return pairs;
 }
 
-function ToolCallGroup({ pairs }: { pairs: ToolPair[] }) {
-  const [expanded, setExpanded] = useState(false);
+function ToolCallGroup({ pairs, autoAccept, onUndoFile, isFromHistory }: { pairs: ToolPair[]; autoAccept?: boolean; onUndoFile?: (fileId: string, versionId: string) => Promise<void>; isFromHistory?: boolean }) {
+  // Auto-expand when reviewing edits (autoAccept off, has file-modifying tools)
+  const hasReviewableTools = !autoAccept && pairs.some(
+    (p) => p.type === "tool" && ["write_file", "edit_file", "delete_file"].includes(p.tool || "") && p.result?.versionId
+  );
+  const [expanded, setExpanded] = useState(hasReviewableTools && !isFromHistory);
   const completedCount = pairs.filter((p) => p.completed).length;
   const hasErrors = pairs.some((p) => p.result && !p.result.success);
   const allDone = completedCount === pairs.length && pairs.length > 0;
@@ -263,7 +284,13 @@ function ToolCallGroup({ pairs }: { pairs: ToolPair[] }) {
       {expanded && (
         <div className="mt-1 rounded-lg border bg-muted/30 divide-y divide-border/50 overflow-hidden">
           {pairs.map((pair, i) => (
-            <ToolCallDetail key={i} pair={pair} />
+            <ToolCallDetail
+              key={i}
+              pair={pair}
+              autoAccept={autoAccept}
+              onUndoFile={onUndoFile}
+              isFromHistory={isFromHistory}
+            />
           ))}
         </div>
       )}
@@ -271,8 +298,34 @@ function ToolCallGroup({ pairs }: { pairs: ToolPair[] }) {
   );
 }
 
-function ToolCallDetail({ pair }: { pair: ToolPair }) {
+function ToolCallDetail({ pair, autoAccept, onUndoFile, isFromHistory }: { pair: ToolPair; autoAccept?: boolean; onUndoFile?: (fileId: string, versionId: string) => Promise<void>; isFromHistory?: boolean }) {
   const [showResult, setShowResult] = useState(false);
+
+  // Review state for file-modifying tools
+  const isFileModifying = ["write_file", "edit_file", "delete_file"].includes(pair.tool || "");
+  const canReview = !autoAccept && isFileModifying && pair.result?.versionId && pair.result?.fileId;
+  // Messages from history default to "accepted"
+  const [reviewState, setReviewState] = useState<"pending" | "accepted" | "undone">(
+    isFromHistory || autoAccept ? "accepted" : "pending"
+  );
+  const [isUndoing, setIsUndoing] = useState(false);
+
+  const handleAccept = useCallback(() => {
+    setReviewState("accepted");
+  }, []);
+
+  const handleUndo = useCallback(async () => {
+    if (!onUndoFile || !pair.result?.fileId || !pair.result?.versionId) return;
+    setIsUndoing(true);
+    try {
+      await onUndoFile(pair.result.fileId, pair.result.versionId);
+      setReviewState("undone");
+    } catch {
+      // Keep as pending if undo fails
+    } finally {
+      setIsUndoing(false);
+    }
+  }, [onUndoFile, pair.result?.fileId, pair.result?.versionId]);
 
   if (pair.type === "agent") {
     return (
@@ -315,14 +368,22 @@ function ToolCallDetail({ pair }: { pair: ToolPair }) {
   }
   const hoverTitle = hoverLines.join("\n");
 
+  // Should we show the review panel?
+  const showReviewPanel = canReview && pair.completed && reviewState === "pending";
+
   return (
     <div className="px-3 py-2 text-xs">
       <button
-        onClick={() => pair.completed && setShowResult(!showResult)}
+        onClick={() => pair.completed && !showReviewPanel && setShowResult(!showResult)}
         title={hoverTitle}
         className="flex items-center gap-2 w-full text-left"
       >
-        {pair.completed ? (
+        {/* Status icon */}
+        {canReview && reviewState === "undone" ? (
+          <XCircle className="h-3 w-3 text-amber-500 flex-shrink-0" />
+        ) : canReview && reviewState === "accepted" ? (
+          <CheckCircle2 className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+        ) : pair.completed ? (
           isError ? (
             <AlertTriangle className="h-3 w-3 text-red-500 flex-shrink-0" />
           ) : (
@@ -333,22 +394,71 @@ function ToolCallDetail({ pair }: { pair: ToolPair }) {
         )}
         <span className={cn(
           "font-medium",
-          isError ? "text-red-600 dark:text-red-400" : "text-foreground"
+          isError ? "text-red-600 dark:text-red-400"
+            : reviewState === "undone" ? "text-amber-600 dark:text-amber-400 line-through"
+            : "text-foreground"
         )}>
           {label}
         </span>
         {detail && (
           <span className="text-muted-foreground truncate flex-1">{detail}</span>
         )}
-        {pair.completed && pair.result?.filePath && (
+        {/* Review state badges */}
+        {canReview && reviewState === "accepted" && !isFromHistory && (
+          <span className="text-emerald-600 dark:text-emerald-400 text-[10px] flex-shrink-0 font-medium">aceito</span>
+        )}
+        {canReview && reviewState === "undone" && (
+          <span className="text-amber-600 dark:text-amber-400 text-[10px] flex-shrink-0 font-medium">(desfeito)</span>
+        )}
+        {!canReview && pair.completed && pair.result?.filePath && (
           <span className="text-muted-foreground/70 text-[10px] flex-shrink-0">
             {pair.result.filePath}
           </span>
         )}
       </button>
 
-      {/* Expandable result */}
-      {showResult && resultText && (
+      {/* Review panel (when autoAccept is off and state is pending) */}
+      {showReviewPanel && (
+        <div className="mt-2 rounded-lg border bg-muted/20 p-2.5 space-y-2">
+          {/* Inline diff for edit_file */}
+          {pair.tool === "edit_file" && pair.result?.oldText && pair.result?.newText && (
+            <InlineDiff oldText={pair.result.oldText} newText={pair.result.newText} />
+          )}
+          {/* Info for write_file */}
+          {pair.tool === "write_file" && (
+            <div className="text-[11px] text-muted-foreground">
+              {resultText}
+            </div>
+          )}
+          {/* Info for delete_file */}
+          {pair.tool === "delete_file" && (
+            <div className="text-[11px] text-red-600 dark:text-red-400">
+              Arquivo removido: {pair.result?.filePath}
+            </div>
+          )}
+          {/* Accept / Undo buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAccept}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+            >
+              <Check className="h-3 w-3" />
+              Aceitar
+            </button>
+            <button
+              onClick={handleUndo}
+              disabled={isUndoing}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium bg-amber-500/15 text-amber-700 dark:text-amber-400 hover:bg-amber-500/25 transition-colors disabled:opacity-50"
+            >
+              <Undo2 className="h-3 w-3" />
+              {isUndoing ? "Desfazendo..." : "Desfazer"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Expandable result (regular mode) */}
+      {showResult && resultText && !showReviewPanel && (
         <div className={cn(
           "mt-1.5 rounded px-2.5 py-2 text-[11px] font-mono whitespace-pre-wrap break-all max-h-32 overflow-y-auto",
           isError
@@ -357,6 +467,40 @@ function ToolCallDetail({ pair }: { pair: ToolPair }) {
         )}>
           {resultText.length > 500 ? resultText.slice(0, 500) + "..." : resultText}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────── Inline diff component ───────────
+
+function InlineDiff({ oldText, newText }: { oldText: string; newText: string }) {
+  const [showFull, setShowFull] = useState(false);
+  const maxLines = 15;
+
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  const needsTruncation = !showFull && (oldLines.length > maxLines || newLines.length > maxLines);
+  const displayOld = needsTruncation ? oldLines.slice(0, maxLines).join("\n") : oldText;
+  const displayNew = needsTruncation ? newLines.slice(0, maxLines).join("\n") : newText;
+
+  return (
+    <div className="rounded border bg-background text-[11px] font-mono overflow-hidden">
+      {/* Removed lines */}
+      <div className="bg-red-50 dark:bg-red-900/20 border-b border-red-200/50 dark:border-red-800/30 px-2.5 py-1.5 whitespace-pre-wrap break-all text-red-800 dark:text-red-300 line-through max-h-40 overflow-y-auto">
+        {displayOld}
+      </div>
+      {/* Added lines */}
+      <div className="bg-green-50 dark:bg-green-900/20 px-2.5 py-1.5 whitespace-pre-wrap break-all text-green-800 dark:text-green-300 max-h-40 overflow-y-auto">
+        {displayNew}
+      </div>
+      {needsTruncation && (
+        <button
+          onClick={() => setShowFull(true)}
+          className="w-full text-center py-1 text-[10px] text-muted-foreground hover:text-foreground bg-muted/30 border-t transition-colors"
+        >
+          ver mais ({oldLines.length + newLines.length} linhas)
+        </button>
       )}
     </div>
   );

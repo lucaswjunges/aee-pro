@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Send, StopCircle, Sparkles } from "lucide-react";
+import { Send, StopCircle, Sparkles, ShieldCheck, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "./chat-message";
 import { QuickActions } from "./quick-actions";
@@ -80,6 +80,7 @@ export function Chat({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const isStreamingRef = useRef(false); // Mirror for use in async callbacks
   const [isThinking, setIsThinking] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [streamToolCalls, setStreamToolCalls] = useState<SSEEvent[]>([]);
@@ -114,6 +115,29 @@ export function Chat({
     },
     [historyKey]
   );
+
+  // --- Auto-accept toggle (review mode) ---
+  const [autoAccept, setAutoAccept] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem("estudio-auto-accept");
+      return stored === null ? true : stored === "true";
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleAutoAccept = useCallback(() => {
+    setAutoAccept((prev) => {
+      const next = !prev;
+      localStorage.setItem("estudio-auto-accept", String(next));
+      return next;
+    });
+  }, []);
+
+  const handleUndoFile = useCallback(async (fileId: string, versionId: string) => {
+    await api.post(`/workspace/drive/files/${fileId}/versions/${versionId}/restore`, {});
+    onFilesChange();
+  }, [onFilesChange]);
 
   // --- Ghost text suggestions (Tab to accept) ---
   const fallbackIndexRef = useRef(
@@ -170,9 +194,10 @@ export function Chat({
   // Debounce file refreshes — collapses rapid tool_result events into one refresh
   const debouncedFilesChange = useDebouncedCallback(onFilesChange, 600);
 
-  // Load existing messages
+  // Load existing messages (skip while streaming to avoid overwriting live state)
   useEffect(() => {
     if (!conversationId) return;
+    if (isStreamingRef.current) return;
     api
       .get<
         Array<{
@@ -183,6 +208,8 @@ export function Chat({
         }>
       >(`/workspace/projects/${projectId}/messages?conversationId=${conversationId}`)
       .then((res) => {
+        // Double-check: streaming may have started between the fetch and the resolve
+        if (isStreamingRef.current) return;
         if (res.success && res.data) {
           setMessages(
             res.data
@@ -197,6 +224,20 @@ export function Chat({
         }
       });
   }, [projectId, conversationId]);
+
+  // Auto-send template prompt from sessionStorage
+  const templateSentRef = useRef(false);
+  useEffect(() => {
+    if (templateSentRef.current) return;
+    const key = `estudio-template-prompt:${projectId}`;
+    const pending = sessionStorage.getItem(key);
+    if (pending) {
+      templateSentRef.current = true;
+      sessionStorage.removeItem(key);
+      // Small delay to let the component fully mount
+      setTimeout(() => sendMessage(pending), 300);
+    }
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll
   useEffect(() => {
@@ -224,6 +265,7 @@ export function Chat({
     setInput("");
     setCurrentSuggestion(""); // Clear while streaming
     setIsStreaming(true);
+    isStreamingRef.current = true;
     setIsThinking(false);
     setStreamText("");
     setStreamToolCalls([]);
@@ -358,6 +400,7 @@ export function Chat({
       }
     } finally {
       setIsStreaming(false);
+      isStreamingRef.current = false;
       setIsThinking(false);
       abortControllerRef.current = null;
       // Re-focus textarea so user can type immediately
@@ -476,6 +519,8 @@ export function Chat({
                 role={msg.role}
                 content={msg.content}
                 toolCalls={msg.toolCalls}
+                autoAccept={autoAccept}
+                onUndoFile={handleUndoFile}
               />
             ))}
             {isStreaming && (
@@ -486,6 +531,8 @@ export function Chat({
                 isStreaming={!streamText && streamToolCalls.length === 0}
                 isThinking={isThinking}
                 liveStreaming
+                autoAccept={autoAccept}
+                onUndoFile={handleUndoFile}
               />
             )}
           </>
@@ -549,9 +596,32 @@ export function Chat({
             </Button>
           )}
         </div>
-        <p className="text-[10px] text-muted-foreground/60 text-center mt-1.5">
-          Tab aceitar sugestão · ↑ prompt anterior · Enter enviar
-        </p>
+        <div className="flex items-center justify-between mt-1.5 px-1">
+          <button
+            onClick={toggleAutoAccept}
+            className={`inline-flex items-center gap-1 text-[10px] rounded-md px-1.5 py-0.5 transition-colors ${
+              autoAccept
+                ? "text-muted-foreground/60 hover:text-muted-foreground"
+                : "text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/15"
+            }`}
+            title={autoAccept ? "Clique para revisar edições antes de aceitar" : "Clique para aplicar edições automaticamente"}
+          >
+            {autoAccept ? (
+              <>
+                <ShieldCheck className="h-3 w-3" />
+                <span>Aplicar automaticamente</span>
+              </>
+            ) : (
+              <>
+                <ShieldAlert className="h-3 w-3" />
+                <span>Revisar edições</span>
+              </>
+            )}
+          </button>
+          <p className="text-[10px] text-muted-foreground/60">
+            Tab sugestão · ↑ histórico · Enter enviar
+          </p>
+        </div>
       </div>
     </div>
   );
