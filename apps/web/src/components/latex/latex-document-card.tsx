@@ -1,10 +1,11 @@
 import { Link } from "react-router-dom";
-import { FileText, Trash2, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { Trash2, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
 import type { LatexDocument } from "@aee-pro/shared";
 import { HEAT_LEVELS, SIZE_LEVELS } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { PdfIcon } from "@/components/ui/pdf-icon";
 
 interface LatexDocumentCardProps {
   document: LatexDocument;
@@ -55,7 +56,7 @@ export function LatexDocumentCard({
             className="flex items-start gap-3 min-w-0 flex-1"
           >
             <div className="relative shrink-0 mt-0.5">
-              <FileText className={`h-5 w-5 ${document.status === "completed" ? "text-green-600" : isBusy ? "text-yellow-500" : "text-red-600"}`} />
+              <PdfIcon size="sm" />
               {document.status === "compile_error" && (
                 <AlertTriangle className="h-3 w-3 text-destructive absolute -bottom-1 -right-1" />
               )}

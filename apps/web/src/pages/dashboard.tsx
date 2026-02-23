@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PdfIcon } from "@/components/ui/pdf-icon";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 
@@ -110,8 +111,8 @@ export function DashboardPage() {
           <Card className="cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Documentos</CardTitle>
-              <div className="rounded-lg bg-purple-100 dark:bg-purple-900/40 p-2">
-                <FileText className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+              <div className="rounded-lg bg-red-100 dark:bg-red-900/40 p-2">
+                <PdfIcon size="sm" />
               </div>
             </CardHeader>
             <CardContent>
@@ -200,7 +201,7 @@ export function DashboardPage() {
             </div>
           ) : !stats?.recentDocuments.length ? (
             <div className="text-center py-8 text-muted-foreground">
-              <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <PdfIcon size="lg" className="mx-auto mb-2 opacity-50" />
               <p>Nenhum documento gerado ainda.</p>
               <p className="text-sm mt-1">
                 Cadastre um aluno e gere seu primeiro documento!

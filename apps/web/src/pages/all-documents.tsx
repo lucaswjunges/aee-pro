@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowLeft, FileText, CheckCircle, AlertCircle, Clock, ArrowRight, Loader2, FileCode, Search, X } from "lucide-react";
+import { ArrowLeft, CheckCircle, AlertCircle, Clock, ArrowRight, Loader2, FileCode, Search, X } from "lucide-react";
 import type { Document, LatexDocument, Student } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { PdfIcon } from "@/components/ui/pdf-icon";
 import { api } from "@/lib/api";
 
 interface UnifiedDoc {
@@ -189,7 +190,7 @@ export function AllDocumentsPage() {
         </div>
       ) : documents.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
-          <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+          <PdfIcon size="lg" className="mx-auto mb-2 opacity-50" />
           <p>Nenhum documento gerado ainda.</p>
         </div>
       ) : filtered.length === 0 ? (

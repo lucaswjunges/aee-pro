@@ -1,9 +1,10 @@
 import { Link } from "react-router-dom";
-import { FileText, Trash2, RefreshCw, Loader2, Check } from "lucide-react";
+import { Trash2, RefreshCw, Loader2, Check } from "lucide-react";
 import type { Document } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { PdfIcon } from "@/components/ui/pdf-icon";
 
 interface DocumentCardProps {
   document: Document;
@@ -63,7 +64,7 @@ export function DocumentCard({
           )}
         </div>
       )}
-      <FileText className="h-5 w-5 mt-0.5 shrink-0 text-primary" />
+      <PdfIcon size="sm" className="mt-0.5" />
       <div className="min-w-0 flex-1">
         <p className="font-medium break-words leading-snug">{document.title}</p>
         <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -137,7 +138,7 @@ export function DocumentCard({
             to={`/alunos/${studentId}/documentos/${document.id}`}
             className="flex items-start gap-3 min-w-0 flex-1"
           >
-            <FileText className="h-5 w-5 mt-0.5 shrink-0 text-primary" />
+            <PdfIcon size="sm" className="mt-0.5" />
             <div className="min-w-0">
               <p className="font-medium break-words leading-snug">{document.title}</p>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
