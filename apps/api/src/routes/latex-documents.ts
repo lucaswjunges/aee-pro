@@ -1467,11 +1467,20 @@ latexDocumentRoutes.post("/:id/regenerate", async (c) => {
   const heatLevel = doc.heatLevel;
   const sizeLevel = doc.sizeLevel;
   const printMode = doc.printMode === "bw" ? "bw" as const : "color" as const;
+
+  // Fetch session data for types that benefit from it
+  let regenSessionData: SessionSummary[] | undefined;
+  if (SESSION_DATA_TYPES.has(doc.documentType)) {
+    regenSessionData = await fetchSessionSummaries(db, userId, doc.studentId);
+  }
+
   const { system, user } = buildLatexPrompt(
     student as unknown as Parameters<typeof buildLatexPrompt>[0],
     doc.documentType,
     heatLevel,
     sizeLevel,
+    undefined,
+    regenSessionData,
   );
 
   const now = new Date().toISOString();
