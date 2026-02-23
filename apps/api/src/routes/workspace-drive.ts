@@ -543,7 +543,7 @@ export async function saveVersion(
   sizeBytes: number,
   db: ReturnType<typeof createDb>,
   r2?: R2Bucket
-): Promise<void> {
+): Promise<string | null> {
   // Get current max version number
   const latest = await db
     .select({ versionNumber: workspaceFileVersions.versionNumber })
@@ -571,8 +571,9 @@ export async function saveVersion(
     }
   }
 
+  const versionId = crypto.randomUUID();
   await db.insert(workspaceFileVersions).values({
-    id: crypto.randomUUID(),
+    id: versionId,
     fileId,
     versionNumber: nextVersion,
     r2Key: versionR2Key,
@@ -599,4 +600,6 @@ export async function saveVersion(
         .where(eq(workspaceFileVersions.id, v.id));
     }
   }
+
+  return versionId;
 }

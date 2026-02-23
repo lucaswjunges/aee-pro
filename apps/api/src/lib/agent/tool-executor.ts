@@ -25,6 +25,12 @@ export interface ToolExecResult {
   error?: string;
   fileId?: string;
   filePath?: string;
+  /** ID of the version snapshot saved before modification (for undo) */
+  versionId?: string;
+  /** Truncated old text for inline diff display (edit_file only) */
+  oldText?: string;
+  /** Truncated new text for inline diff display (edit_file only) */
+  newText?: string;
 }
 
 export async function executeTool(
@@ -142,9 +148,11 @@ async function writeFile(
 
   let fileId: string;
 
+  let versionId: string | null = null;
+
   if (existing) {
     // Save current version before overwriting
-    await saveVersion(existing.id, existing.r2Key, existing.sizeBytes ?? 0, ctx.db, ctx.r2).catch(() => {});
+    versionId = await saveVersion(existing.id, existing.r2Key, existing.sizeBytes ?? 0, ctx.db, ctx.r2).catch(() => null);
     if (existing.r2Key !== r2Key) {
       await ctx.r2.delete(existing.r2Key).catch(() => {});
     }
@@ -179,6 +187,7 @@ async function writeFile(
     output: `Arquivo ${existing ? "atualizado" : "criado"}: ${path} (${contentBytes.byteLength} bytes)`,
     fileId,
     filePath: path,
+    ...(versionId ? { versionId } : {}),
   };
 }
 
@@ -263,7 +272,7 @@ async function editFile(
   }
 
   // Save current version before editing
-  await saveVersion(file.id, file.r2Key, file.sizeBytes ?? 0, ctx.db, ctx.r2).catch(() => {});
+  const versionId = await saveVersion(file.id, file.r2Key, file.sizeBytes ?? 0, ctx.db, ctx.r2).catch(() => null);
 
   const newContent = targetContent.replace(matchedOld, cleanNew);
   const contentBytes = new TextEncoder().encode(newContent);
@@ -280,11 +289,19 @@ async function editFile(
     })
     .where(eq(workspaceFiles.id, file.id));
 
+  // Truncate diff text for frontend display (~2000 chars)
+  const maxDiff = 2000;
+  const truncOld = matchedOld.length > maxDiff ? matchedOld.slice(0, maxDiff) + "\n..." : matchedOld;
+  const truncNew = cleanNew.length > maxDiff ? cleanNew.slice(0, maxDiff) + "\n..." : cleanNew;
+
   return {
     success: true,
     output: `Arquivo editado: ${path} (substituição feita)`,
     fileId: file.id,
     filePath: path,
+    ...(versionId ? { versionId } : {}),
+    oldText: truncOld,
+    newText: truncNew,
   };
 }
 
@@ -523,22 +540,25 @@ async function getStudentData(
   studentId: string,
   ctx: ToolExecContext
 ): Promise<ToolExecResult> {
-  // If no studentId provided, try to get from project
-  let sid = studentId;
+  // Always resolve student from the project first — the AI often passes
+  // a name/slug instead of the actual UUID, so the project link is the
+  // most reliable source.
+  const project = await ctx.db
+    .select()
+    .from(workspaceProjects)
+    .where(eq(workspaceProjects.id, ctx.projectId))
+    .get();
+
+  // Use project's linked student; only fall back to the provided ID if it
+  // looks like a UUID (contains dashes) and the project has no link.
+  const isUUID = studentId && studentId.includes("-");
+  const sid = project?.studentId || (isUUID ? studentId : null);
+
   if (!sid) {
-    const project = await ctx.db
-      .select()
-      .from(workspaceProjects)
-      .where(eq(workspaceProjects.id, ctx.projectId))
-      .get();
-    if (project?.studentId) {
-      sid = project.studentId;
-    } else {
-      return {
-        success: false,
-        error: "Nenhum aluno vinculado ao projeto. Informe o student_id.",
-      };
-    }
+    return {
+      success: false,
+      error: "Nenhum aluno vinculado ao projeto. Vincule um aluno nas configurações do projeto.",
+    };
   }
 
   const student = await ctx.db
@@ -548,7 +568,7 @@ async function getStudentData(
     .get();
 
   if (!student) {
-    return { success: false, error: `Aluno não encontrado: ${sid}` };
+    return { success: false, error: `Aluno não encontrado (id: ${sid})` };
   }
 
   // Format student data as readable text
