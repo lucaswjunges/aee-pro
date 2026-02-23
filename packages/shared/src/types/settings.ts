@@ -34,8 +34,8 @@ export const AI_PROVIDERS: Record<AIProviderType, {
   },
   gemini: {
     name: "Google Gemini (Gratuito)",
-    defaultModel: "gemini-2.0-flash",
-    models: ["gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-preview-05-06", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"],
+    defaultModel: "gemini-2.5-flash",
+    models: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-2.0-flash-lite"],
     free: true,
     apiKeyUrl: "https://aistudio.google.com/apikey",
     apiKeyHint: "Acesse o Google AI Studio e crie uma API key gratuitamente.",
@@ -49,10 +49,11 @@ export const AI_PROVIDERS: Record<AIProviderType, {
   },
   openrouter: {
     name: "OpenRouter (Vários modelos)",
-    defaultModel: "google/gemini-2.5-flash-preview-05-20",
+    defaultModel: "google/gemini-2.5-flash",
     models: [
-      "google/gemini-2.5-flash-preview-05-20",
-      "google/gemini-2.5-pro-preview-05-06",
+      "google/gemini-2.5-flash",
+      "google/gemini-2.5-flash-lite",
+      "google/gemini-2.5-pro",
       "deepseek/deepseek-chat",
       "meta-llama/llama-4-scout",
       "anthropic/claude-opus-4-6",

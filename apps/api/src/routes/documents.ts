@@ -968,12 +968,12 @@ function getDefaultModel(provider: string): string {
   switch (provider) {
     case "openai": return "gpt-4.1-mini";
     case "anthropic": return "claude-sonnet-4-6";
-    case "gemini": return "gemini-2.0-flash";
+    case "gemini": return "gemini-2.5-flash";
     case "groq": return "llama-3.3-70b-versatile";
     case "deepseek": return "deepseek-chat";
     case "mistral": return "mistral-small-latest";
     case "cohere": return "command-r-plus";
-    case "openrouter": return "openai/gpt-4.1-mini";
+    case "openrouter": return "google/gemini-2.5-flash";
     case "together": return "meta-llama/Llama-3.3-70B-Instruct-Turbo";
     default: return "gpt-4.1-mini";
   }
