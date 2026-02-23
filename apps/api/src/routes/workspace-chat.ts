@@ -226,14 +226,49 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
     }
   }
 
+  // Shared mutable state for collecting the assistant response
+  const assistantTextParts: string[] = [];
+  const toolCallsData: unknown[] = [];
+  let saved = false;
+
+  /** Persist assistant message + update timestamps */
+  async function saveAssistantMessage() {
+    if (saved) return;
+    saved = true;
+    try {
+      const text = assistantTextParts.join("");
+      const toolCalls = toolCallsData;
+      if (text || toolCalls.length > 0) {
+        await db.insert(workspaceMessages).values({
+          id: crypto.randomUUID(),
+          conversationId: conversationId!,
+          role: "assistant",
+          content: text || "(tool calls only)",
+          toolCalls: toolCalls.length > 0 ? JSON.stringify(toolCalls) : null,
+          createdAt: new Date().toISOString(),
+        });
+        console.log(`[workspace-chat] Saved assistant message (${text.length} chars, ${toolCalls.length} tool events)`);
+      } else {
+        console.log("[workspace-chat] Nothing to save (no text, no tool calls)");
+      }
+      const now = new Date().toISOString();
+      await db
+        .update(workspaceConversations)
+        .set({ updatedAt: now })
+        .where(eq(workspaceConversations.id, conversationId!));
+      await db
+        .update(workspaceProjects)
+        .set({ updatedAt: now })
+        .where(eq(workspaceProjects.id, projectId));
+    } catch (err) {
+      console.error("[workspace-chat] Failed to save assistant message:", err);
+    }
+  }
+
   // Stream response via SSE
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const assistantTextParts: string[] = [];
-      const toolCallsData: unknown[] = [];
-      let saved = false;
-
       let streamCancelled = false;
 
       function safeSend(chunk: string) {
@@ -242,38 +277,6 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
           controller.enqueue(encoder.encode(chunk));
         } catch {
           streamCancelled = true;
-        }
-      }
-
-      /** Persist assistant message + update timestamps */
-      async function saveAssistantMessage() {
-        if (saved) return;
-        saved = true;
-        try {
-          const text = assistantTextParts.join("");
-          const toolCalls = toolCallsData;
-          if (text || toolCalls.length > 0) {
-            await db.insert(workspaceMessages).values({
-              id: crypto.randomUUID(),
-              conversationId: conversationId!,
-              role: "assistant",
-              content: text || "(tool calls only)",
-              toolCalls: toolCalls.length > 0 ? JSON.stringify(toolCalls) : null,
-              createdAt: new Date().toISOString(),
-            });
-            console.log(`[workspace-chat] Saved assistant message (${text.length} chars, ${toolCalls.length} tool events)`);
-          }
-          const now = new Date().toISOString();
-          await db
-            .update(workspaceConversations)
-            .set({ updatedAt: now })
-            .where(eq(workspaceConversations.id, conversationId!));
-          await db
-            .update(workspaceProjects)
-            .set({ updatedAt: now })
-            .where(eq(workspaceProjects.id, projectId));
-        } catch (err) {
-          console.error("[workspace-chat] Failed to save assistant message:", err);
         }
       }
 
@@ -306,6 +309,10 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
           if (event.type === "text" && event.content) {
             assistantTextParts.push(event.content);
           }
+          if (event.type === "error" && event.content) {
+            // Persist error messages so they survive page reload
+            assistantTextParts.push(`\n\nErro: ${event.content}`);
+          }
           if (
             event.type === "tool_call" ||
             event.type === "tool_result" ||
@@ -326,19 +333,48 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
           safeSend(`data: ${sseData}\n\n`);
           safeSend(": flush\n\n");
         }
+
+        // Ensure save even if the loop ended without a "done" event
+        // (e.g. AI API error yields "error" then returns without "done")
+        await saveAssistantMessage();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        console.error("[workspace-chat] Agent loop error:", msg);
+        assistantTextParts.push(`\n\nErro: ${msg}`);
+        // Save partial response before sending error to client
+        await saveAssistantMessage();
         safeSend(
           `data: ${JSON.stringify({ type: "error", content: msg })}\n\n`
         );
       }
 
-      // Fallback save in case "done" was never yielded (e.g. uncaught error)
-      await saveAssistantMessage();
-
       try { controller.close(); } catch { /* stream already cancelled */ }
     },
   });
+
+  // Keep worker alive until save completes — even if the client disconnects
+  // or the stream is cancelled, the save MUST finish.
+  c.executionCtx.waitUntil(
+    // Give the stream time to finish, then ensure save ran
+    new Promise<void>((resolve) => {
+      // Poll until saved or timeout (30s — save now happens reliably
+      // inside the stream, this is just a safety net for aborted streams)
+      const start = Date.now();
+      const check = () => {
+        if (saved || Date.now() - start > 30_000) {
+          // Final fallback: force save if not yet done
+          if (!saved) {
+            saveAssistantMessage().finally(resolve);
+          } else {
+            resolve();
+          }
+        } else {
+          setTimeout(check, 500);
+        }
+      };
+      check();
+    })
+  );
 
   return new Response(stream, {
     headers: {
