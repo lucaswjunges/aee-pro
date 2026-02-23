@@ -80,11 +80,6 @@ export function ChatMessage({
           isUser ? "items-end flex flex-col" : "items-start flex flex-col"
         )}
       >
-        {/* Tool calls (before text content) */}
-        {toolPairs.length > 0 && (
-          <ToolCallGroup pairs={toolPairs} />
-        )}
-
         {/* Text content with markdown */}
         {content && (
           <div
@@ -97,6 +92,11 @@ export function ChatMessage({
           >
             <MarkdownContent text={content} isUser={isUser} />
           </div>
+        )}
+
+        {/* Tool calls (after text content) */}
+        {toolPairs.length > 0 && (
+          <ToolCallGroup pairs={toolPairs} />
         )}
 
         {/* Thinking indicator (AI processing after tool results) */}
