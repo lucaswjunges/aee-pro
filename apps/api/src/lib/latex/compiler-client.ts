@@ -3,6 +3,11 @@ export interface CompileImage {
   data_base64: string;
 }
 
+export interface CompileFile {
+  filename: string;
+  content: string;
+}
+
 export interface CompileResult {
   success: boolean;
   pdfBase64?: string;
@@ -27,6 +32,7 @@ export async function compileLatex(
   compilerUrl: string,
   compilerToken: string,
   images?: CompileImage[],
+  additionalFiles?: CompileFile[],
 ): Promise<CompileResult> {
   if (!compilerUrl) {
     return { success: false, error: "LATEX_COMPILER_URL não configurado" };
@@ -43,6 +49,7 @@ export async function compileLatex(
       body: JSON.stringify({
         latex_source: latexSource,
         ...(images && images.length > 0 ? { images } : {}),
+        ...(additionalFiles && additionalFiles.length > 0 ? { additional_files: additionalFiles } : {}),
       }),
     });
   } catch (err) {

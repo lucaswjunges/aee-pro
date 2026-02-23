@@ -6,7 +6,7 @@ import {
   prompts,
 } from "@aee-pro/db/schema";
 import type { Database } from "../../db/index";
-import { compileLatex, type CompileImage } from "../latex/compiler-client";
+import { compileLatex, type CompileImage, type CompileFile } from "../latex/compiler-client";
 import { sanitizeLatexSource } from "../latex/sanitizer";
 import { saveVersion } from "../../routes/workspace-drive";
 
@@ -408,12 +408,13 @@ async function compileLatexFile(
   // Fix \\ after sectioning commands — causes "There's no line here to end"
   latexSource = fixLineBreakAfterSectioning(latexSource);
 
-  // Collect images referenced in the project
+  // Collect all project files for compilation
   const allFiles = await ctx.db
     .select()
     .from(workspaceFiles)
     .where(eq(workspaceFiles.projectId, ctx.projectId));
 
+  // Collect images
   const images: CompileImage[] = [];
   const imageFiles = allFiles.filter((f) => f.mimeType.startsWith("image/"));
 
@@ -427,12 +428,29 @@ async function compileLatexFile(
     images.push({ filename: img.path, data_base64: base64 });
   }
 
+  // Collect additional text files (.tex, .bib, .sty, .cls) — everything except the main file
+  const additionalFiles: CompileFile[] = [];
+  const auxExtensions = [".tex", ".bib", ".sty", ".cls", ".bst"];
+  const auxFiles = allFiles.filter(
+    (f) =>
+      f.path !== path &&
+      auxExtensions.some((ext) => f.path.endsWith(ext))
+  );
+
+  for (const aux of auxFiles) {
+    const auxObj = await ctx.r2.get(aux.r2Key);
+    if (!auxObj) continue;
+    const content = await auxObj.text();
+    additionalFiles.push({ filename: aux.path, content });
+  }
+
   // Compile
   const result = await compileLatex(
     latexSource,
     ctx.compilerUrl,
     ctx.compilerToken,
-    images.length > 0 ? images : undefined
+    images.length > 0 ? images : undefined,
+    additionalFiles.length > 0 ? additionalFiles : undefined
   );
 
   if (!result.success) {

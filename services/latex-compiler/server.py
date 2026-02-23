@@ -20,9 +20,16 @@ class ImagePayload(BaseModel):
     data_base64: str
 
 
+class FilePayload(BaseModel):
+    """Additional text file (e.g. .tex, .bib, .sty) to place alongside the main document."""
+    filename: str
+    content: str
+
+
 class CompileRequest(BaseModel):
     latex_source: str
     images: list[ImagePayload] | None = None
+    additional_files: list[FilePayload] | None = None
 
 
 class CompileResponse(BaseModel):
@@ -113,6 +120,17 @@ def compile_latex(
 
     try:
         latex_source = req.latex_source
+
+        # Write additional files (e.g. \input{} referenced .tex, .bib, .sty)
+        if req.additional_files:
+            for af in req.additional_files:
+                # Sanitize filename to prevent path traversal
+                safe_name = os.path.basename(af.filename)
+                if not safe_name:
+                    continue
+                af_path = os.path.join(tmpdir, safe_name)
+                with open(af_path, "w", encoding="utf-8") as af_file:
+                    af_file.write(af.content)
 
         # Decode images and enable real graphicx if images provided
         try:
