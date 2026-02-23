@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Sparkles } from "lucide-react";
+import { ArrowLeft, Sparkles, Maximize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Chat } from "@/components/estudio/chat";
@@ -27,6 +27,8 @@ export function EstudioProjectPage() {
   const [selectedFile, setSelectedFile] = useState<WorkspaceFile | null>(null);
   const [editFile, setEditFile] = useState<WorkspaceFile | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const [fullscreenPreview, setFullscreenPreview] = useState(false);
   const [mode, setMode] = useState<"simple" | "advanced">("simple");
   const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>([]);
 
@@ -58,6 +60,7 @@ export function EstudioProjectPage() {
       setSelectedFile(file);
 
       if (file.mimeType === "application/pdf" || file.mimeType.startsWith("image/")) {
+        setPreviewText(null);
         const token = api.getToken();
         const res = await fetch(`${API_BASE}/workspace/files/${file.id}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -68,10 +71,21 @@ export function EstudioProjectPage() {
           setPreviewUrl(url);
           if (isMobile) setActiveTab("preview");
         }
-      } else if (isTextFile(file.mimeType) && mode === "advanced") {
-        // In advanced mode, open text files in editor
-        setEditFile(file);
-        if (isMobile) setActiveTab("editor");
+      } else if (isTextFile(file.mimeType)) {
+        setPreviewUrl(null);
+        // Fetch text content for preview
+        const res = await api.get<{ content: string }>(
+          `/workspace/files/${file.id}/text`
+        );
+        if (res.success && res.data) {
+          setPreviewText(res.data.content);
+          if (isMobile) setActiveTab("preview");
+        }
+        // In advanced mode, also open in editor
+        if (mode === "advanced") {
+          setEditFile(file);
+          if (isMobile) setActiveTab("editor");
+        }
       }
     },
     [isMobile, mode]
@@ -155,15 +169,15 @@ export function EstudioProjectPage() {
               selectedFile={selectedFile?.id}
             />
           )}
-          {activeTab === "preview" && previewUrl && (
+          {activeTab === "preview" && (previewUrl || previewText !== null) && (
             <div className="h-full">
-              {selectedFile?.mimeType === "application/pdf" ? (
+              {selectedFile?.mimeType === "application/pdf" && previewUrl ? (
                 <iframe
                   src={previewUrl}
                   className="w-full h-full border-0"
                   title="PDF Preview"
                 />
-              ) : selectedFile?.mimeType.startsWith("image/") ? (
+              ) : selectedFile?.mimeType.startsWith("image/") && previewUrl ? (
                 <div className="flex items-center justify-center h-full p-4">
                   <img
                     src={previewUrl}
@@ -171,6 +185,10 @@ export function EstudioProjectPage() {
                     className="max-w-full max-h-full object-contain"
                   />
                 </div>
+              ) : previewText !== null ? (
+                <pre className="h-full overflow-auto p-4 text-xs font-mono bg-muted/30 whitespace-pre-wrap break-words leading-relaxed">
+                  {previewText}
+                </pre>
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                   Selecione um arquivo para visualizar
@@ -226,32 +244,44 @@ export function EstudioProjectPage() {
             </div>
 
             {/* Preview panel */}
-            {previewUrl && selectedFile && (
+            {(previewUrl || previewText !== null) && selectedFile && (
               <div className="w-[40%] border-l flex-shrink-0 overflow-hidden flex flex-col">
                 <div className="flex items-center justify-between px-3 py-2 border-b">
                   <span className="text-xs font-medium truncate">
                     {selectedFile.path}
                   </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    onClick={() => {
-                      setPreviewUrl(null);
-                      setSelectedFile(null);
-                    }}
-                  >
-                    Fechar
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setFullscreenPreview(true)}
+                      title="Tela cheia"
+                    >
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => {
+                        setPreviewUrl(null);
+                        setPreviewText(null);
+                        setSelectedFile(null);
+                      }}
+                    >
+                      Fechar
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex-1 overflow-hidden">
-                  {selectedFile.mimeType === "application/pdf" ? (
+                  {selectedFile.mimeType === "application/pdf" && previewUrl ? (
                     <iframe
                       src={previewUrl}
                       className="w-full h-full border-0"
                       title="PDF Preview"
                     />
-                  ) : selectedFile.mimeType.startsWith("image/") ? (
+                  ) : selectedFile.mimeType.startsWith("image/") && previewUrl ? (
                     <div className="flex items-center justify-center h-full p-4 bg-muted/30">
                       <img
                         src={previewUrl}
@@ -259,6 +289,10 @@ export function EstudioProjectPage() {
                         className="max-w-full max-h-full object-contain"
                       />
                     </div>
+                  ) : previewText !== null ? (
+                    <pre className="h-full overflow-auto p-4 text-xs font-mono bg-muted/30 whitespace-pre-wrap break-words leading-relaxed">
+                      {previewText}
+                    </pre>
                   ) : null}
                 </div>
               </div>
@@ -287,7 +321,7 @@ export function EstudioProjectPage() {
               {/* Chat */}
               <div className={cn(
                 "overflow-hidden",
-                previewUrl ? "h-1/2 border-b" : "flex-1"
+                (previewUrl || previewText !== null) ? "h-1/2 border-b" : "flex-1"
               )}>
                 <Chat
                   projectId={project.id}
@@ -298,7 +332,7 @@ export function EstudioProjectPage() {
                 />
               </div>
               {/* Preview */}
-              {previewUrl && selectedFile && (
+              {(previewUrl || previewText !== null) && selectedFile && (
                 <div className="h-1/2 flex flex-col overflow-hidden">
                   <div className="flex items-center justify-between px-3 py-1.5 border-b">
                     <span className="text-xs font-medium truncate">
@@ -310,6 +344,7 @@ export function EstudioProjectPage() {
                       className="h-5 px-1.5 text-[10px]"
                       onClick={() => {
                         setPreviewUrl(null);
+                        setPreviewText(null);
                         setSelectedFile(null);
                       }}
                     >
@@ -317,13 +352,13 @@ export function EstudioProjectPage() {
                     </Button>
                   </div>
                   <div className="flex-1 overflow-hidden">
-                    {selectedFile.mimeType === "application/pdf" ? (
+                    {selectedFile.mimeType === "application/pdf" && previewUrl ? (
                       <iframe
                         src={previewUrl}
                         className="w-full h-full border-0"
                         title="PDF Preview"
                       />
-                    ) : selectedFile.mimeType.startsWith("image/") ? (
+                    ) : selectedFile.mimeType.startsWith("image/") && previewUrl ? (
                       <div className="flex items-center justify-center h-full p-2 bg-muted/30">
                         <img
                           src={previewUrl}
@@ -331,6 +366,10 @@ export function EstudioProjectPage() {
                           className="max-w-full max-h-full object-contain"
                         />
                       </div>
+                    ) : previewText !== null ? (
+                      <pre className="h-full overflow-auto p-4 text-xs font-mono bg-muted/30 whitespace-pre-wrap break-words leading-relaxed">
+                        {previewText}
+                      </pre>
                     ) : null}
                   </div>
                 </div>
@@ -339,6 +378,47 @@ export function EstudioProjectPage() {
           </>
         )}
       </div>
+
+      {/* Fullscreen preview overlay */}
+      {fullscreenPreview && selectedFile && (previewUrl || previewText !== null) && (
+        <div className="fixed inset-0 z-50 bg-background flex flex-col">
+          <div className="flex items-center justify-between px-4 py-2 border-b">
+            <span className="text-sm font-medium truncate">
+              {selectedFile.path}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-3 text-xs gap-1.5"
+              onClick={() => setFullscreenPreview(false)}
+            >
+              <X className="h-4 w-4" />
+              Fechar
+            </Button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            {selectedFile.mimeType === "application/pdf" && previewUrl ? (
+              <iframe
+                src={previewUrl}
+                className="w-full h-full border-0"
+                title="PDF Preview"
+              />
+            ) : selectedFile.mimeType.startsWith("image/") && previewUrl ? (
+              <div className="flex items-center justify-center h-full p-8 bg-muted/30">
+                <img
+                  src={previewUrl}
+                  alt={selectedFile.path}
+                  className="max-w-full max-h-full object-contain"
+                />
+              </div>
+            ) : previewText !== null ? (
+              <pre className="h-full overflow-auto p-6 text-sm font-mono bg-muted/30 whitespace-pre-wrap break-words leading-relaxed">
+                {previewText}
+              </pre>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
