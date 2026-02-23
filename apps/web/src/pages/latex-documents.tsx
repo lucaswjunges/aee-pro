@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Plus, ArrowLeft, FileText, FileCode, ClipboardList, BookOpen } from "lucide-react";
+import { Plus, ArrowLeft, FileText, FileCode, ClipboardList, BookOpen, TrendingUp } from "lucide-react";
 import type { Student, LatexDocument } from "@aee-pro/shared";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -120,22 +120,29 @@ export function LatexDocumentsPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex border-b">
+      <div className="flex border-b overflow-x-auto">
         <Link
           to={`/alunos/${id}/sessoes`}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent"
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent whitespace-nowrap"
         >
           <ClipboardList className="h-4 w-4" />
           Sessões
         </Link>
         <Link
+          to={`/alunos/${id}/evolucao`}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent whitespace-nowrap"
+        >
+          <TrendingUp className="h-4 w-4" />
+          Evolução
+        </Link>
+        <Link
           to={`/alunos/${id}/documentos`}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent"
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-muted-foreground hover:text-foreground border-b-2 border-transparent whitespace-nowrap"
         >
           <FileText className="h-4 w-4" />
           Documentos Texto
         </Link>
-        <div className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 border-primary text-primary">
+        <div className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 border-primary text-primary whitespace-nowrap">
           <FileCode className="h-4 w-4" />
           Documentos LaTeX
         </div>

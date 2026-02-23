@@ -9,6 +9,7 @@ import { dashboardRoutes } from "./routes/dashboard";
 import { latexDocumentRoutes } from "./routes/latex-documents";
 import { imageRoutes } from "./routes/images";
 import { aeeSessionRoutes } from "./routes/aee-sessions";
+import { evolutionRoutes } from "./routes/evolution";
 
 export type Env = {
   Bindings: {
@@ -46,6 +47,7 @@ app.route("/api/dashboard", dashboardRoutes);
 app.route("/api/latex-documents", latexDocumentRoutes);
 app.route("/api/images", imageRoutes);
 app.route("/api/aee-sessions", aeeSessionRoutes);
+app.route("/api/evolution", evolutionRoutes);
 
 export default {
   fetch: app.fetch.bind(app),

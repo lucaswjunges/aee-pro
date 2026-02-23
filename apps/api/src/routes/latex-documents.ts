@@ -1,12 +1,12 @@
 import { Hono } from "hono";
-import { eq, and, desc } from "drizzle-orm";
-import { latexDocuments, students, userSettings, userImages } from "@aee-pro/db/schema";
+import { eq, and, desc, asc } from "drizzle-orm";
+import { latexDocuments, students, userSettings, userImages, aeeSessions } from "@aee-pro/db/schema";
 import { createDb } from "../db/index";
 import { authMiddleware } from "../middleware/auth";
 import { decrypt } from "../lib/encryption";
 import { createAIProvider } from "../lib/ai/index";
 import { getLatexPreamble } from "../lib/latex/preamble";
-import { buildLatexPrompt, buildSignatureBlock } from "../lib/latex/prompt-builder";
+import { buildLatexPrompt, buildSignatureBlock, type SessionSummary } from "../lib/latex/prompt-builder";
 import { getLatexModel, normalizeModelForProvider } from "../lib/latex/model-selection";
 import { getDocumentTypeConfig } from "../lib/latex/document-types";
 import { compileLatex } from "../lib/latex/compiler-client";
@@ -161,6 +161,57 @@ function checkContentQuality(body: string): string | null {
   return null;
 }
 
+/** Document types that benefit from session data in their prompts */
+const SESSION_DATA_TYPES = new Set([
+  "grafico-evolucao",
+  "relatorio-bimestral",
+  "relatorio-semestral",
+  "relatorio-anual",
+  "avancos-retrocessos",
+  "parecer-descritivo",
+  "plano-metas",
+]);
+
+async function fetchSessionSummaries(
+  db: ReturnType<typeof createDb>,
+  userId: string,
+  studentId: string,
+  periodStart?: string,
+  periodEnd?: string,
+): Promise<SessionSummary[]> {
+  const conditions = [
+    eq(aeeSessions.userId, userId),
+    eq(aeeSessions.studentId, studentId),
+  ];
+  if (periodStart) {
+    const { gte } = await import("drizzle-orm");
+    conditions.push(gte(aeeSessions.sessionDate, periodStart));
+  }
+  if (periodEnd) {
+    const { lte } = await import("drizzle-orm");
+    conditions.push(lte(aeeSessions.sessionDate, periodEnd));
+  }
+
+  const sessions = await db
+    .select()
+    .from(aeeSessions)
+    .where(and(...conditions))
+    .orderBy(asc(aeeSessions.sessionDate));
+
+  return sessions.map((s) => ({
+    date: s.sessionDate,
+    present: !!s.present,
+    objectives: s.objectives,
+    studentResponse: s.studentResponse,
+    ratingCognitive: s.ratingCognitive,
+    ratingLinguistic: s.ratingLinguistic,
+    ratingMotor: s.ratingMotor,
+    ratingSocial: s.ratingSocial,
+    ratingAutonomy: s.ratingAutonomy,
+    ratingAcademic: s.ratingAcademic,
+  }));
+}
+
 function sanitizeTruncatedLatex(latex: string): string {
   // Ensure \end{document} exists
   let result = latex;
@@ -312,6 +363,229 @@ latexDocumentRoutes.post("/dossie", async (c) => {
   return new Response(pdfBuffer, { headers });
 });
 
+// ---------- POST /generate-periodic ----------
+
+latexDocumentRoutes.post("/generate-periodic", async (c) => {
+  const userId = c.get("userId");
+  const body = (await c.req.json()) as {
+    studentId: string;
+    periodType: "mensal" | "bimestral" | "semestral" | "anual";
+    periodStart: string;
+    periodEnd: string;
+    heatLevel?: number;
+    sizeLevel?: number;
+    printMode?: "color" | "bw";
+  };
+
+  if (!body.studentId || !body.periodType || !body.periodStart || !body.periodEnd) {
+    return c.json({ success: false, error: "studentId, periodType, periodStart e periodEnd são obrigatórios" }, 400);
+  }
+
+  const periodTypeMap: Record<string, string> = {
+    mensal: "relatorio-bimestral",
+    bimestral: "relatorio-bimestral",
+    semestral: "relatorio-semestral",
+    anual: "relatorio-anual",
+  };
+  const periodLabelMap: Record<string, string> = {
+    mensal: "Mensal",
+    bimestral: "Bimestral",
+    semestral: "Semestral",
+    anual: "Anual",
+  };
+
+  const documentType = periodTypeMap[body.periodType];
+  if (!documentType) {
+    return c.json({ success: false, error: "Tipo de período inválido" }, 400);
+  }
+
+  const heatLevel = Math.max(1, Math.min(5, body.heatLevel ?? 3));
+  const sizeLevel = Math.max(1, Math.min(5, body.sizeLevel ?? 3));
+  const printMode = body.printMode === "bw" ? "bw" as const : "color" as const;
+
+  const typeConfig = getDocumentTypeConfig(documentType);
+  if (!typeConfig) {
+    return c.json({ success: false, error: "Tipo de documento inválido" }, 400);
+  }
+
+  const db = createDb(c.env.DB);
+
+  const student = await db
+    .select()
+    .from(students)
+    .where(and(eq(students.id, body.studentId), eq(students.userId, userId)))
+    .get();
+
+  if (!student) {
+    return c.json({ success: false, error: "Aluno não encontrado" }, 404);
+  }
+
+  const settings = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId))
+    .get();
+
+  if (!settings?.aiProvider || !settings?.aiApiKeyEncrypted) {
+    return c.json({ success: false, error: "Configure o provider de IA nas configurações" }, 400);
+  }
+
+  let apiKey: string;
+  try {
+    apiKey = await decrypt(settings.aiApiKeyEncrypted, c.env.SESSION_SECRET);
+  } catch {
+    return c.json({ success: false, error: "Erro ao descriptografar a chave de API" }, 500);
+  }
+
+  // Fetch session data for the period
+  const sessionData = await fetchSessionSummaries(db, userId, body.studentId, body.periodStart, body.periodEnd);
+
+  // Build custom prompt with period context
+  const periodLabel = periodLabelMap[body.periodType];
+  const customPrompt = `PERÍODO DO RELATÓRIO: ${periodLabel} — de ${body.periodStart} a ${body.periodEnd}
+Total de sessões no período: ${sessionData.length}
+Sessões com presença: ${sessionData.filter((s) => s.present).length}
+Use os dados das sessões fornecidos para gerar o relatório baseado em evidências reais.`;
+
+  const { system, user } = buildLatexPrompt(
+    student as unknown as Parameters<typeof buildLatexPrompt>[0],
+    documentType,
+    heatLevel,
+    sizeLevel,
+    customPrompt,
+    sessionData,
+  );
+
+  const now = new Date().toISOString();
+  const docId = crypto.randomUUID();
+  const model = normalizeModelForProvider(settings.aiModel || getLatexModel(settings.aiProvider), settings.aiProvider);
+  const typeName = LATEX_DOCUMENT_TYPES.find((t) => t.slug === documentType)?.name ?? typeConfig.name;
+  const effectiveMaxTokens = getMaxTokens(sizeLevel);
+
+  await db.insert(latexDocuments).values({
+    id: docId,
+    userId,
+    studentId: body.studentId,
+    documentType,
+    title: `${typeName} (${periodLabel}) - ${student.name}`,
+    status: "generating",
+    heatLevel,
+    sizeLevel,
+    printMode,
+    aiProvider: settings.aiProvider,
+    aiModel: model,
+    compilationAttempts: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const newDoc = await db.select().from(latexDocuments).where(eq(latexDocuments.id, docId)).get();
+  const periodicAiProvider = settings.aiProvider!;
+
+  const processPeriodicGeneration = async () => {
+    try {
+      if (!c.env.LATEX_COMPILER_URL) {
+        await db
+          .update(latexDocuments)
+          .set({ status: "error", lastCompilationError: "LATEX_COMPILER_URL não configurado.", updatedAt: new Date().toISOString() })
+          .where(eq(latexDocuments.id, docId));
+        return;
+      }
+
+      const preamble = getLatexPreamble({
+        documentTitle: typeName,
+        studentName: student.name,
+        schoolName: student.school ?? "Escola",
+        printMode,
+      });
+
+      const provider = createAIProvider(periodicAiProvider, apiKey);
+      const result = await provider.generate({
+        model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        maxTokens: effectiveMaxTokens,
+        temperature: 0.7,
+      });
+
+      let latexBody = extractLatexBody(result.content);
+
+      const qualityError = checkContentQuality(latexBody);
+      if (qualityError) {
+        await db
+          .update(latexDocuments)
+          .set({ status: "error", lastCompilationError: qualityError, updatedAt: new Date().toISOString() })
+          .where(eq(latexDocuments.id, docId));
+        return;
+      }
+
+      latexBody = injectSignatureBlock(latexBody, documentType, student as Parameters<typeof buildSignatureBlock>[1]);
+      const fullSource = preamble + latexBody;
+
+      await db
+        .update(latexDocuments)
+        .set({ latexSource: fullSource, status: "compiling", generatedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
+        .where(eq(latexDocuments.id, docId));
+
+      const images = await resolveImagesFromLatex(fullSource, userId, db, c.env.R2);
+
+      const compileResult = await compileWithAutoFix(
+        fullSource,
+        c.env.LATEX_COMPILER_URL,
+        c.env.LATEX_COMPILER_TOKEN,
+        provider,
+        model,
+        effectiveMaxTokens,
+        images.length > 0 ? images : undefined,
+      );
+
+      if (compileResult.success && compileResult.pdfBase64) {
+        const r2Key = `latex-pdfs/${userId}/${docId}.pdf`;
+        const pdfBuffer = Uint8Array.from(atob(compileResult.pdfBase64), (ch) => ch.charCodeAt(0));
+        await c.env.R2.put(r2Key, pdfBuffer, { httpMetadata: { contentType: "application/pdf" } });
+
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: compileResult.latexSource,
+            pdfR2Key: r2Key,
+            pdfSizeBytes: compileResult.pdfSizeBytes ?? pdfBuffer.length,
+            status: "completed",
+            compilationAttempts: compileResult.attempts,
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
+            lastCompilationError: null,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, docId));
+      } else {
+        await db
+          .update(latexDocuments)
+          .set({
+            latexSource: compileResult.latexSource,
+            status: "compile_error",
+            compilationAttempts: compileResult.attempts,
+            compilationWarnings: JSON.stringify(filterDisplayWarnings(compileResult.warnings ?? [])),
+            lastCompilationError: compileResult.lastError ?? "Erro na compilação",
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(latexDocuments.id, docId));
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Erro desconhecido na geração";
+      await db
+        .update(latexDocuments)
+        .set({ status: "error", lastCompilationError: errorMsg, updatedAt: new Date().toISOString() })
+        .where(eq(latexDocuments.id, docId))
+        .catch(() => {});
+    }
+  };
+
+  c.executionCtx.waitUntil(processPeriodicGeneration());
+  return c.json({ success: true, data: newDoc }, 201);
+});
+
 // ---------- POST /generate ----------
 
 latexDocumentRoutes.post("/generate", async (c) => {
@@ -375,6 +649,12 @@ latexDocumentRoutes.post("/generate", async (c) => {
     return c.json({ success: false, error: "Erro ao descriptografar a chave de API" }, 500);
   }
 
+  // Fetch session data for types that benefit from it
+  let sessionData: SessionSummary[] | undefined;
+  if (SESSION_DATA_TYPES.has(body.documentType)) {
+    sessionData = await fetchSessionSummaries(db, userId, body.studentId);
+  }
+
   // Build prompt
   const { system, user } = buildLatexPrompt(
     student as unknown as Parameters<typeof buildLatexPrompt>[0],
@@ -382,6 +662,7 @@ latexDocumentRoutes.post("/generate", async (c) => {
     heatLevel,
     sizeLevel,
     customPrompt,
+    sessionData,
   );
   const effectiveMaxTokens = unlimitedTokens ? 65536 : getMaxTokens(sizeLevel);
 

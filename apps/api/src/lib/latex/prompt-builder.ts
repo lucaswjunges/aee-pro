@@ -54,6 +54,19 @@ interface StudentData {
   [key: string]: string | null | undefined;
 }
 
+export interface SessionSummary {
+  date: string;
+  present: boolean;
+  objectives: string | null;
+  studentResponse: string | null;
+  ratingCognitive: number | null;
+  ratingLinguistic: number | null;
+  ratingMotor: number | null;
+  ratingSocial: number | null;
+  ratingAutonomy: number | null;
+  ratingAcademic: number | null;
+}
+
 interface PromptResult {
   system: string;
   user: string;
@@ -315,12 +328,46 @@ function extractCity(endereco: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+function formatSessionData(sessions: SessionSummary[]): string {
+  if (sessions.length === 0) return "";
+  const ratingLabel = (v: number | null) => {
+    if (v == null) return "—";
+    const labels: Record<number, string> = {
+      1: "Não iniciado",
+      2: "Em desenvolvimento",
+      3: "Em progresso",
+      4: "Consolidando",
+      5: "Alcançado",
+    };
+    return `${v} (${labels[v] ?? v})`;
+  };
+
+  const lines = sessions.map((s) => {
+    const parts = [
+      `Data: ${s.date}`,
+      `Presença: ${s.present ? "Sim" : "Não"}`,
+    ];
+    if (s.objectives) parts.push(`Objetivos: ${s.objectives}`);
+    if (s.studentResponse) parts.push(`Resposta do aluno: ${s.studentResponse}`);
+    if (s.ratingCognitive != null) parts.push(`Cognitivo: ${ratingLabel(s.ratingCognitive)}`);
+    if (s.ratingLinguistic != null) parts.push(`Linguagem: ${ratingLabel(s.ratingLinguistic)}`);
+    if (s.ratingMotor != null) parts.push(`Motor: ${ratingLabel(s.ratingMotor)}`);
+    if (s.ratingSocial != null) parts.push(`Social: ${ratingLabel(s.ratingSocial)}`);
+    if (s.ratingAutonomy != null) parts.push(`Autonomia: ${ratingLabel(s.ratingAutonomy)}`);
+    if (s.ratingAcademic != null) parts.push(`Acadêmico: ${ratingLabel(s.ratingAcademic)}`);
+    return parts.join(" | ");
+  });
+
+  return `\nDADOS DAS SESSÕES DE ATENDIMENTO (${sessions.length} sessões):\n${lines.join("\n")}\n`;
+}
+
 export function buildLatexPrompt(
   student: StudentData,
   documentType: string,
   heatLevel: number,
   sizeLevel: number,
   customPrompt?: string,
+  sessionData?: SessionSummary[],
 ): PromptResult {
   const config = getDocumentTypeConfig(documentType);
   if (!config) {
@@ -390,6 +437,10 @@ ${antiDetection}`;
     ? `\nINSTRUÇÕES ADICIONAIS DO USUÁRIO:\n${customPrompt.trim()}\n`
     : "";
 
+  const sessionBlock = sessionData && sessionData.length > 0
+    ? formatSessionData(sessionData)
+    : "";
+
   const user = `TIPO DE DOCUMENTO: ${config.name}
 
 ${config.instruction}
@@ -400,7 +451,7 @@ ${sizeInstruction}
 
 DADOS DO ALUNO:
 ${studentData}
-${customBlock}
+${sessionBlock}${customBlock}
 Gere o corpo LaTeX completo, começando com \\begin{document} e terminando com \\end{document}. O preâmbulo já está pronto — NÃO o inclua.
 
 NÃO inclua bloco de assinaturas nem espaço para assinatura — isso será adicionado automaticamente pelo sistema.
