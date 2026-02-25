@@ -56,7 +56,7 @@ export async function compileLatex(
     const msg = err instanceof Error ? err.message : String(err);
     return {
       success: false,
-      error: `Compilador LaTeX indisponível (${compilerUrl}): ${msg}`,
+      error: `[ERRO DE REDE — NÃO RETENTAR] Compilador LaTeX indisponível. Informe à professora que o serviço de compilação está offline e peça para tentar novamente mais tarde. Erro técnico: ${msg}`,
     };
   }
 

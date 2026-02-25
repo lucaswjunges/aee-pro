@@ -65,6 +65,55 @@ def _extract_warnings(log_path: str) -> list[str]:
     return warnings
 
 
+def _parse_latex_errors(lines: list[str]) -> str:
+    """Parse LaTeX log lines into structured error messages with line numbers.
+
+    Example output:
+        ERRO na linha 42: Undefined control sequence \\palavraschaves
+        Contexto: l.42 \\palavraschaves{Educação, AEE}
+    """
+    import re
+
+    errors: list[str] = []
+    i = 0
+    while i < len(lines) and len(errors) < 5:
+        line = lines[i].rstrip()
+        if line.startswith("!"):
+            error_msg = line[2:].strip()  # Remove "! "
+            line_num = None
+            context_lines = []
+
+            # Look ahead for line number (l.NNN) and context
+            for j in range(i + 1, min(i + 8, len(lines))):
+                ctx = lines[j].rstrip()
+                context_lines.append(ctx)
+                # Match "l.42 ..." or "l.42" at start of line
+                m = re.match(r"l\.(\d+)\s*(.*)", ctx)
+                if m:
+                    line_num = int(m.group(1))
+                    break
+
+            if line_num:
+                entry = f"ERRO na linha {line_num}: {error_msg}"
+            else:
+                entry = f"ERRO: {error_msg}"
+
+            # Add up to 3 lines of context
+            if context_lines:
+                ctx_str = "\n  ".join(context_lines[:3])
+                entry += f"\n  {ctx_str}"
+
+            errors.append(entry)
+            i += len(context_lines) + 1
+        else:
+            i += 1
+
+    if not errors:
+        return ""
+
+    return "\n\n".join(errors)
+
+
 MAX_IMAGES_TOTAL_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
@@ -164,25 +213,14 @@ def compile_latex(
             stderr = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
 
             if result.returncode != 0:
-                # Extract meaningful error lines from log
+                # Extract structured error info from log
                 log_path = os.path.join(tmpdir, "document.log")
                 error_log = ""
                 if os.path.exists(log_path):
                     with open(log_path, "r", encoding="utf-8", errors="replace") as f:
                         lines = f.readlines()
-                    # Extract error lines
-                    error_lines = []
-                    capture = False
-                    for line in lines:
-                        if line.startswith("!") or capture:
-                            error_lines.append(line.rstrip())
-                            capture = True
-                            if len(error_lines) > 5:
-                                capture = False
-                        if len(error_lines) > 30:
-                            break
-                    error_log = "\n".join(error_lines) if error_lines else stdout[-2000:]
-                else:
+                    error_log = _parse_latex_errors(lines)
+                if not error_log:
                     error_log = stdout[-2000:] if stdout else stderr[-2000:]
 
                 return CompileResponse(
