@@ -53,12 +53,19 @@ export async function executeTool(
           input.path as string,
           input.old_text as string,
           input.new_text as string,
-          ctx
+          ctx,
+          input.replace_all as boolean | undefined
         );
       case "list_files":
         return await listFiles(ctx);
       case "delete_file":
         return await deleteFile(input.path as string, ctx);
+      case "rename_file":
+        return await renameFile(
+          input.old_path as string,
+          input.new_path as string,
+          ctx
+        );
       case "search_files":
         return await searchFiles(input.query as string, ctx);
       case "compile_latex":
@@ -195,7 +202,8 @@ async function editFile(
   path: string,
   oldText: string,
   newText: string,
-  ctx: ToolExecContext
+  ctx: ToolExecContext,
+  replaceAll?: boolean
 ): Promise<ToolExecResult> {
   const file = await ctx.db
     .select()
@@ -274,7 +282,9 @@ async function editFile(
   // Save current version before editing
   const versionId = await saveVersion(file.id, file.r2Key, file.sizeBytes ?? 0, ctx.db, ctx.r2).catch(() => null);
 
-  const newContent = targetContent.replace(matchedOld, cleanNew);
+  const newContent = replaceAll
+    ? targetContent.split(matchedOld).join(cleanNew)
+    : targetContent.replace(matchedOld, cleanNew);
   const contentBytes = new TextEncoder().encode(newContent);
 
   await ctx.r2.put(file.r2Key, contentBytes, {
@@ -619,6 +629,80 @@ async function getPromptTemplate(
   return {
     success: true,
     output: `Template: ${prompt.name}\n\n${prompt.promptTemplate || "(template vazio)"}`,
+  };
+}
+
+async function renameFile(
+  oldPath: string,
+  newPath: string,
+  ctx: ToolExecContext
+): Promise<ToolExecResult> {
+  const file = await ctx.db
+    .select()
+    .from(workspaceFiles)
+    .where(
+      and(
+        eq(workspaceFiles.projectId, ctx.projectId),
+        eq(workspaceFiles.path, oldPath)
+      )
+    )
+    .get();
+
+  if (!file) {
+    return { success: false, error: `Arquivo não encontrado: ${oldPath}` };
+  }
+
+  // Check if target path already exists
+  const existing = await ctx.db
+    .select()
+    .from(workspaceFiles)
+    .where(
+      and(
+        eq(workspaceFiles.projectId, ctx.projectId),
+        eq(workspaceFiles.path, newPath)
+      )
+    )
+    .get();
+
+  if (existing) {
+    return { success: false, error: `Já existe um arquivo em: ${newPath}` };
+  }
+
+  const newR2Key = `workspace/${ctx.userId}/${ctx.projectId}/${newPath}`;
+  const newMimeType = guessMimeType(newPath);
+
+  // Copy object in R2 to new key
+  const object = await ctx.r2.get(file.r2Key);
+  if (!object) {
+    return { success: false, error: `Conteúdo não encontrado para: ${oldPath}` };
+  }
+
+  const body = await object.arrayBuffer();
+  await ctx.r2.put(newR2Key, body, {
+    httpMetadata: { contentType: newMimeType },
+  });
+
+  // Delete old R2 key if different
+  if (file.r2Key !== newR2Key) {
+    await ctx.r2.delete(file.r2Key).catch(() => {});
+  }
+
+  // Update DB record
+  await ctx.db
+    .update(workspaceFiles)
+    .set({
+      path: newPath,
+      r2Key: newR2Key,
+      mimeType: newMimeType,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(workspaceFiles.id, file.id));
+
+  return {
+    success: true,
+    output: `Arquivo renomeado: ${oldPath} → ${newPath}`,
+    fileId: file.id,
+    filePath: newPath,
   };
 }
 
