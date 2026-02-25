@@ -78,6 +78,18 @@ interface SSEEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers — Event Loop Yielding
+// ---------------------------------------------------------------------------
+
+/**
+ * Yield control back to the event loop so other requests (health checks,
+ * page loads, SSE keep-alives) can be processed.  The workerd runtime is
+ * single-threaded; without periodic yields, long-running agent loops
+ * monopolise the thread and make the Worker appear frozen.
+ */
+const yieldEventLoop = () => new Promise<void>((r) => setTimeout(r, 0));
+
+// ---------------------------------------------------------------------------
 // Agent Loop
 // ---------------------------------------------------------------------------
 
@@ -113,6 +125,10 @@ export async function* runAgentLoop(
     : defaultMax;
 
   for (let iteration = 0; iteration < maxIter; iteration++) {
+    // Yield between iterations so the event loop can serve other requests
+    if (iteration > 0) await yieldEventLoop();
+
+    console.log(`[agent] iteration ${iteration}, provider: ${opts.providerType}, model: ${opts.model}`);
     let response: {
       content: ClaudeContentBlock[];
       stop_reason: string;
@@ -145,6 +161,7 @@ export async function* runAgentLoop(
         response = { content: accumulated, stop_reason: stopReason };
       } else {
         // ---- Blocking path for OpenAI-compatible providers ----
+        console.log(`[agent] calling ${opts.providerType} API...`);
         response = await callOpenAICompatibleWithTools(
           opts.apiKey,
           opts.providerType,
@@ -155,6 +172,9 @@ export async function* runAgentLoop(
           maxTokens
         );
 
+        console.log(`[agent] ${opts.providerType} returned, blocks: ${response.content.length}, stop: ${response.stop_reason}`);
+        // Yield event loop after receiving large JSON response
+        await yieldEventLoop();
         // Yield text blocks after receiving complete response
         for (const block of response.content) {
           if (block.type === "text" && block.text) {
@@ -273,6 +293,9 @@ export async function* runAgentLoop(
       }
     }
 
+    // Yield after tool execution before next iteration
+    await yieldEventLoop();
+
     // Add tool results to history
     messages.push({ role: "user", content: toolResults });
 
@@ -383,15 +406,28 @@ async function* streamAnthropicWithTools(
     body.temperature = 1;
   }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2025-04-15",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const anthropicController = new AbortController();
+  const anthropicTimeout = setTimeout(() => anthropicController.abort(), 120_000); // 120s for streaming
+  let res: Response;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2025-04-15",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: anthropicController.signal,
+    });
+  } catch (err) {
+    clearTimeout(anthropicTimeout);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Tempo limite excedido (120s) aguardando resposta da Anthropic.");
+    }
+    throw err;
+  }
+  clearTimeout(anthropicTimeout);
 
   if (!res.ok) {
     const err = await res.text();
@@ -661,11 +697,23 @@ async function callOpenAICompatibleWithTools(
   let res: Response | null = null;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    res = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(requestBody),
-    });
+    const fetchController = new AbortController();
+    const fetchTimeout = setTimeout(() => fetchController.abort(), 90_000); // 90s max per AI call
+    try {
+      res = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: fetchController.signal,
+      });
+    } catch (err) {
+      clearTimeout(fetchTimeout);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error(`Tempo limite excedido (90s) aguardando resposta do ${providerType}. Tente um modelo mais rápido.`);
+      }
+      throw err;
+    }
+    clearTimeout(fetchTimeout);
 
     if (res.status === 429 && attempt < MAX_RETRIES) {
       // Parse retry-after header or use exponential backoff
@@ -699,6 +747,9 @@ async function callOpenAICompatibleWithTools(
       finish_reason: string;
     }>;
   };
+
+  // Yield after parsing potentially large JSON response
+  await yieldEventLoop();
 
   const choice = data.choices[0];
   if (!choice) {
@@ -737,6 +788,8 @@ async function callOpenAICompatibleWithTools(
   if (!hasNativeToolCalls && choice.message.content) {
     const toolNames = tools.map((t) => t.name);
     const parsed = parseTextToolCalls(choice.message.content, toolNames);
+    // Yield after regex-heavy text parsing
+    await yieldEventLoop();
     if (parsed) {
       // Replace garbled text with clean version
       content.length = 0;

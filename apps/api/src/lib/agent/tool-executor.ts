@@ -10,6 +10,9 @@ import { compileLatex, type CompileImage, type CompileFile } from "../latex/comp
 import { sanitizeLatexSource } from "../latex/sanitizer";
 import { saveVersion } from "../../routes/workspace-drive";
 
+/** Yield control to the event loop so other requests can be processed */
+const yieldEventLoop = () => new Promise<void>((r) => setTimeout(r, 0));
+
 export interface ToolExecContext {
   db: Database;
   r2: R2Bucket;
@@ -407,6 +410,8 @@ async function compileLatexFile(
   path: string,
   ctx: ToolExecContext
 ): Promise<ToolExecResult> {
+  console.log("[compile_latex] START", path);
+  console.log("[compile_latex] step 1: DB query for file");
   // Read the .tex file
   const file = await ctx.db
     .select()
@@ -423,17 +428,27 @@ async function compileLatexFile(
     return { success: false, error: `Arquivo não encontrado: ${path}` };
   }
 
+  console.log("[compile_latex] step 2: R2 read");
   const object = await ctx.r2.get(file.r2Key);
   if (!object) {
     return { success: false, error: `Conteúdo não encontrado: ${path}` };
   }
 
+  console.log("[compile_latex] step 3: text()");
   const rawSource = await object.text();
+  console.log("[compile_latex] step 3 done, rawSource length:", rawSource.length);
 
   // Sanitize: fix common AI-generated LaTeX issues (same pipeline as document generation)
+  // Yield before/after because the sanitizer runs 24+ regex passes synchronously
+  await yieldEventLoop();
+  console.log("[compile_latex] step 4: sanitize START");
+  const sanitizeStart = Date.now();
   let latexSource = sanitizeLatexSource(rawSource);
+  console.log("[compile_latex] step 4a: sanitize done in", Date.now() - sanitizeStart, "ms");
   // Fix \\ after sectioning commands — causes "There's no line here to end"
   latexSource = fixLineBreakAfterSectioning(latexSource);
+  console.log("[compile_latex] step 4b: fixLineBreak done");
+  await yieldEventLoop();
 
   // Collect all project files for compilation
   const allFiles = await ctx.db
@@ -449,10 +464,13 @@ async function compileLatexFile(
     const imgObj = await ctx.r2.get(img.r2Key);
     if (!imgObj) continue;
     const buffer = await imgObj.arrayBuffer();
-    const base64 = btoa(
-      String.fromCharCode(...new Uint8Array(buffer))
-    );
-    images.push({ filename: img.path, data_base64: base64 });
+    // Chunk-based base64 to avoid stack overflow with large images
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + 8192, bytes.length)));
+    }
+    images.push({ filename: img.path, data_base64: btoa(binary) });
   }
 
   // Collect additional text files (.tex, .bib, .sty, .cls) — everything except the main file
@@ -471,7 +489,11 @@ async function compileLatexFile(
     additionalFiles.push({ filename: aux.path, content });
   }
 
+  // Yield after collecting all files (image encoding can be CPU-heavy)
+  if (images.length > 0) await yieldEventLoop();
+
   // Compile
+  console.log("[compile_latex] calling compiler, source length:", latexSource.length, "images:", images.length, "files:", additionalFiles.length);
   const result = await compileLatex(
     latexSource,
     ctx.compilerUrl,
@@ -480,6 +502,7 @@ async function compileLatexFile(
     additionalFiles.length > 0 ? additionalFiles : undefined
   );
 
+  console.log("[compile_latex] compiler returned, success:", result.success);
   if (!result.success) {
     return {
       success: false,
@@ -487,12 +510,19 @@ async function compileLatexFile(
     };
   }
 
+  // Yield after compiler returns (large base64 response)
+  await yieldEventLoop();
+
   // Save PDF to R2
+  console.log("[compile_latex] saving PDF to R2, base64 length:", result.pdfBase64?.length);
   const pdfPath = path.replace(/\.tex$/, ".pdf");
   const pdfR2Key = `workspace/${ctx.userId}/${ctx.projectId}/output/${pdfPath}`;
-  const pdfBytes = Uint8Array.from(atob(result.pdfBase64!), (c) =>
-    c.charCodeAt(0)
-  );
+  // Chunked base64 decode — avoids per-byte callback that blocks event loop
+  const pdfBinary = atob(result.pdfBase64!);
+  const pdfBytes = new Uint8Array(pdfBinary.length);
+  for (let i = 0; i < pdfBinary.length; i++) {
+    pdfBytes[i] = pdfBinary.charCodeAt(i);
+  }
 
   await ctx.r2.put(pdfR2Key, pdfBytes, {
     httpMetadata: { contentType: "application/pdf" },
@@ -763,16 +793,44 @@ function fixLineBreakAfterSectioning(source: string): string {
   let result = source;
 
   // 1. \\ after sectioning commands (handles nested braces like \textbf{})
-  //    Matches: \section*{...{...}...}\\  or  \section{...}\\[5pt]
-  const sectionCmds = "section|subsection|subsubsection|paragraph|subparagraph";
-  result = result.replace(
-    new RegExp(
-      `(\\\\(?:${sectionCmds})\\*?\\s*\\{(?:[^{}]*|\\{[^{}]*\\})*\\})\\s*\\\\\\\\\\s*(?:\\[([^\\]]*)\\])?`,
-      "g"
-    ),
-    (_m: string, cmd: string, spacing?: string) =>
-      spacing ? `${cmd}\n\\vspace{${spacing}}` : cmd
-  );
+  //    Uses loop-based brace matching to avoid catastrophic regex backtracking.
+  const sectionCmdRe = /\\(?:section|subsection|subsubsection|paragraph|subparagraph)\*?\s*\{/g;
+  let secMatch: RegExpExecArray | null;
+  const replacements: Array<{ start: number; end: number; replacement: string }> = [];
+
+  while ((secMatch = sectionCmdRe.exec(result)) !== null) {
+    const braceStart = secMatch.index + secMatch[0].length - 1; // position of {
+    // Find matching closing } using depth counter
+    let depth = 1;
+    let idx = braceStart + 1;
+    while (depth > 0 && idx < result.length) {
+      if (result[idx] === "{") depth++;
+      else if (result[idx] === "}") depth--;
+      idx++;
+    }
+    if (depth !== 0) continue; // unmatched brace, skip
+
+    // idx now points right after the closing }
+    // Check if followed by \\ (with optional whitespace)
+    const afterCmd = result.substring(idx);
+    const trailingMatch = afterCmd.match(/^\s*\\\\\s*(?:\[([^\]]*)\])?/);
+    if (trailingMatch) {
+      const fullEnd = idx + trailingMatch[0].length;
+      const cmdText = result.substring(secMatch.index, idx);
+      const spacing = trailingMatch[1];
+      replacements.push({
+        start: secMatch.index,
+        end: fullEnd,
+        replacement: spacing ? `${cmdText}\n\\vspace{${spacing}}` : cmdText,
+      });
+    }
+  }
+
+  // Apply replacements in reverse order to preserve indices
+  for (let i = replacements.length - 1; i >= 0; i--) {
+    const r = replacements[i];
+    result = result.substring(0, r.start) + r.replacement + result.substring(r.end);
+  }
 
   // 2. \\ right after \begin{...} (same line) for non-tabular environments
   //    Skips tabular, longtable, array, align, equation, gather, split, cases, matrix

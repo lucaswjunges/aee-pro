@@ -40,18 +40,22 @@ export async function compileLatex(
 
   let res: Response;
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000); // 60s max
     res = await fetch(`${compilerUrl}/compile`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${compilerToken}`,
       },
+      signal: controller.signal,
       body: JSON.stringify({
         latex_source: latexSource,
         ...(images && images.length > 0 ? { images } : {}),
         ...(additionalFiles && additionalFiles.length > 0 ? { additional_files: additionalFiles } : {}),
       }),
     });
+    clearTimeout(timeout);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return {
