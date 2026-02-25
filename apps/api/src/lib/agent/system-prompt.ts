@@ -63,7 +63,7 @@ ${ctx.files.length > 0 ? fileList : "(vazio)"}
 CONTINUAÇÃO: Se pedirem "continue", a lista acima é a VERDADE. Se o histórico diz que criou um arquivo mas NÃO está na lista, ele NÃO existe. Crie o que falta e compile. Sub-agentes anteriores NÃO estão rodando.
 
 LaTeX: edit_file parcial (não reescrever inteiro). Não use \\\\ após \\section/\\subsection.
-Dados aluno: get_student_data
+Dados aluno: get_student_data (sem parâmetros — resolve automaticamente pelo projeto)
 Templates: get_prompt_template (slugs: anamnese, pei, pdi, estudo-de-caso, parecer-descritivo, plano-intervencao, adaptacoes-curriculares, adaptacao-avaliacoes, diario-bordo, avancos-retrocessos, relatorio-familia, relatorio-professor, ata-reuniao, rotina-visual)${agentNote}`;
 }
 

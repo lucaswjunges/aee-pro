@@ -71,7 +71,7 @@ export async function executeTool(
       case "compile_latex":
         return await compileLatexFile(input.path as string, ctx);
       case "get_student_data":
-        return await getStudentData(input.student_id as string, ctx);
+        return await getStudentData(ctx);
       case "get_prompt_template":
         return await getPromptTemplate(input.slug as string, ctx);
       default:
@@ -547,22 +547,16 @@ async function compileLatexFile(
 }
 
 async function getStudentData(
-  studentId: string,
   ctx: ToolExecContext
 ): Promise<ToolExecResult> {
-  // Always resolve student from the project first — the AI often passes
-  // a name/slug instead of the actual UUID, so the project link is the
-  // most reliable source.
+  // Resolve student from the project link — no ID needed from the AI.
   const project = await ctx.db
     .select()
     .from(workspaceProjects)
     .where(eq(workspaceProjects.id, ctx.projectId))
     .get();
 
-  // Use project's linked student; only fall back to the provided ID if it
-  // looks like a UUID (contains dashes) and the project has no link.
-  const isUUID = studentId && studentId.includes("-");
-  const sid = project?.studentId || (isUUID ? studentId : null);
+  const sid = project?.studentId;
 
   if (!sid) {
     return {

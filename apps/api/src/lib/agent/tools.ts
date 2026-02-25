@@ -101,13 +101,11 @@ export const WORKSPACE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "get_student_data",
-    description: "Dados completos do aluno vinculado ao projeto.",
+    description:
+      "Retorna dados completos do aluno vinculado ao projeto. Não precisa de parâmetro — o aluno é resolvido automaticamente.",
     input_schema: {
       type: "object",
-      properties: {
-        student_id: { type: "string", description: "ID do aluno" },
-      },
-      required: ["student_id"],
+      properties: {},
     },
   },
   {
