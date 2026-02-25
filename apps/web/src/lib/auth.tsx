@@ -35,12 +35,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((res) => {
         if (res.success && res.data) {
           setUser(res.data);
+        } else if (res.error?.includes("Tempo limite") || res.error?.includes("conexão")) {
+          // API is offline — use a placeholder user so ProtectedRoute doesn't kick to login.
+          // When the API comes back, the next page load will get the real user.
+          console.warn("[auth] API offline, using placeholder user");
+          setUser({ id: "offline", name: "Usuário", email: "", createdAt: "", updatedAt: "" });
         } else {
+          // Genuine auth error (401, invalid token, etc.)
           api.setToken(null);
         }
       })
       .catch(() => {
-        api.setToken(null);
+        // Network error — same: keep session alive with placeholder
+        console.warn("[auth] Network error, using placeholder user");
+        setUser({ id: "offline", name: "Usuário", email: "", createdAt: "", updatedAt: "" });
       })
       .finally(() => {
         setLoading(false);

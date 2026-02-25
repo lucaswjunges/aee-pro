@@ -34,7 +34,7 @@ class ApiClient {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20_000);
+    const timeoutId = setTimeout(() => controller.abort(), 8_000);
 
     try {
       const res = await fetch(`${API_BASE}${path}`, {
@@ -44,6 +44,16 @@ class ApiClient {
       });
 
       clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        try {
+          const json = await res.json();
+          return { success: false, error: json.error || `Erro ${res.status}` };
+        } catch {
+          return { success: false, error: `Erro ${res.status}: ${res.statusText}` };
+        }
+      }
+
       const json = await res.json();
       return json;
     } catch (err) {

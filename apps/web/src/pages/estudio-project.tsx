@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Sparkles, Maximize2, X } from "lucide-react";
+import { ArrowLeft, Sparkles, Maximize2, X, RefreshCw, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Chat } from "@/components/estudio/chat";
@@ -23,6 +23,7 @@ export function EstudioProjectPage() {
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [conversations, setConversations] = useState<WorkspaceConversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [selectedFile, setSelectedFile] = useState<WorkspaceFile | null>(null);
   const [editFile, setEditFile] = useState<WorkspaceFile | null>(null);
@@ -37,6 +38,7 @@ export function EstudioProjectPage() {
 
   const loadProject = useCallback(async () => {
     if (!id) return;
+    setLoadError(null);
     const res = await api.get<{
       files: WorkspaceFile[];
       conversations: WorkspaceConversation[];
@@ -66,6 +68,8 @@ export function EstudioProjectPage() {
       setProject(proj);
       setFiles(f);
       setConversations(c);
+    } else if (!res.success) {
+      setLoadError(res.error || "Não foi possível carregar o projeto");
     }
     setLoading(false);
   }, [id]);
@@ -123,6 +127,28 @@ export function EstudioProjectPage() {
       <div className="space-y-4">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-[calc(100vh-12rem)]" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <WifiOff className="h-10 w-10 text-muted-foreground/50" />
+        <p className="text-muted-foreground text-sm text-center max-w-xs">{loadError}</p>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => { setLoading(true); loadProject(); }}
+            className="gap-2"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Tentar novamente
+          </Button>
+          <Button asChild variant="ghost">
+            <Link to="/estudio">Voltar</Link>
+          </Button>
+        </div>
       </div>
     );
   }
