@@ -118,19 +118,43 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
     createdAt: new Date().toISOString(),
   });
 
-  // Fetch conversation history (last 30 messages)
+  // Fetch conversation history (last 40 messages for smart windowing)
   const history = await db
     .select()
     .from(workspaceMessages)
     .where(eq(workspaceMessages.conversationId, conversationId))
     .orderBy(workspaceMessages.createdAt)
-    .limit(30);
+    .limit(40);
+
+  // Smart history windowing: if >15 messages, summarize older ones
+  // and keep the last 10 in full detail for context
+  const KEEP_RECENT = 10;
+  let conversationSummary: string | undefined;
+  let messagesToConvert = history;
+
+  if (history.length > KEEP_RECENT) {
+    const olderMessages = history.slice(0, history.length - KEEP_RECENT);
+    const recentMessages = history.slice(history.length - KEEP_RECENT);
+
+    // Build compact summary of older messages
+    const summaryParts: string[] = [];
+    for (const msg of olderMessages) {
+      if (msg.role === "user") {
+        summaryParts.push(`Professora: ${msg.content.slice(0, 150)}${msg.content.length > 150 ? "…" : ""}`);
+      } else if (msg.role === "assistant") {
+        const brief = msg.content.slice(0, 100);
+        summaryParts.push(`Assistente: ${brief}${msg.content.length > 100 ? "…" : ""}${msg.toolCalls ? " (+ tools)" : ""}`);
+      }
+    }
+    conversationSummary = summaryParts.join("\n");
+    messagesToConvert = recentMessages;
+  }
 
   // Build messages array for the AI.
   // Historical assistant messages with tool calls are stored as SSE events
   // (not as Claude/OpenAI content blocks), so we convert them to plain text
   // summaries. This is robust across all providers and avoids format mismatches.
-  const claudeMessages = history
+  const claudeMessages = messagesToConvert
     .map((msg) => {
       if (msg.role === "tool_result") {
         // Stale DB format — skip (tool results are embedded in assistant msgs)
@@ -150,7 +174,18 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
             result?: unknown;
             content?: string;
             agentTask?: string;
+            agentId?: string;
           }>;
+
+          // Collect agent IDs that have results, to detect interrupted agents
+          const completedAgentIds = new Set(
+            events.filter((e) => e.type === "agent_result" && e.agentId).map((e) => e.agentId!)
+          );
+          // Collect tools that have results
+          const completedToolIds = new Set(
+            events.filter((e) => e.type === "tool_result" && e.tool).map((e) => e.tool!)
+          );
+
           for (const ev of events) {
             if (ev.type === "tool_call" && ev.tool) {
               const inputSummary = ev.toolInput
@@ -173,7 +208,13 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
                 `[Resultado ${ev.tool}: ${resultStr.length > 300 ? resultStr.slice(0, 300) + "…" : resultStr}]`
               );
             } else if (ev.type === "agent_spawn") {
-              parts.push(`[Iniciei sub-agente: ${ev.agentTask || "tarefa"}]`);
+              const hasResult = ev.agentId && completedAgentIds.has(ev.agentId);
+              if (hasResult) {
+                parts.push(`[Iniciei sub-agente: ${ev.agentTask || "tarefa"}]`);
+              } else {
+                // Agent was started but NEVER completed (stream interrupted)
+                parts.push(`[Sub-agente INTERROMPIDO — NÃO completou: ${ev.agentTask || "tarefa"}. A tarefa precisa ser refeita.]`);
+              }
             } else if (ev.type === "agent_result") {
               const res = ev.content || "";
               parts.push(
@@ -281,10 +322,11 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
       }
 
       try {
+        const providerType = settings.aiProvider!;
         const agentLoop = runAgentLoop({
           apiKey,
-          providerType: settings.aiProvider!,
-          model: normalizeModel(settings.aiModel || getDefaultModel(settings.aiProvider!)),
+          providerType,
+          model: normalizeModel(settings.aiModel || getDefaultModel(providerType)),
           project: {
             id: project.id,
             name: project.name,
@@ -302,6 +344,9 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
             compilerUrl: c.env.LATEX_COMPILER_URL,
             compilerToken: c.env.LATEX_COMPILER_TOKEN,
           },
+          enableThinking: providerType === "anthropic",
+          conversationSummary,
+          maxOutputTokens: settings.maxOutputTokens || undefined,
         });
 
         for await (const event of agentLoop) {
@@ -354,15 +399,13 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
 
   // Keep worker alive until save completes — even if the client disconnects
   // or the stream is cancelled, the save MUST finish.
+  // 120s timeout: sub-agents can take 30-90s each (parallel), plus compilation.
   c.executionCtx.waitUntil(
-    // Give the stream time to finish, then ensure save ran
     new Promise<void>((resolve) => {
-      // Poll until saved or timeout (30s — save now happens reliably
-      // inside the stream, this is just a safety net for aborted streams)
       const start = Date.now();
+      const TIMEOUT_MS = 120_000;
       const check = () => {
-        if (saved || Date.now() - start > 30_000) {
-          // Final fallback: force save if not yet done
+        if (saved || Date.now() - start > TIMEOUT_MS) {
           if (!saved) {
             saveAssistantMessage().finally(resolve);
           } else {
