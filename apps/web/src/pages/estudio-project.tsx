@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Sparkles, Maximize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,9 @@ export function EstudioProjectPage() {
   const [mode, setMode] = useState<"simple" | "advanced">("simple");
   const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>([]);
 
+  // Track PDF file timestamps to detect new/recompiled PDFs
+  const prevPdfStateRef = useRef<Map<string, string>>(new Map());
+
   const loadProject = useCallback(async () => {
     if (!id) return;
     const res = await api.get<{
@@ -40,6 +43,26 @@ export function EstudioProjectPage() {
     } & WorkspaceProject>(`/workspace/projects/${id}`);
     if (res.success && res.data) {
       const { files: f, conversations: c, ...proj } = res.data;
+
+      // Detect new or recompiled PDF files → notify user
+      const newPdfState = new Map(
+        f
+          .filter((file) => file.mimeType === "application/pdf")
+          .map((file) => [file.id, file.updatedAt || ""])
+      );
+      if (prevPdfStateRef.current.size > 0) {
+        for (const [pdfId, updatedAt] of newPdfState) {
+          const prev = prevPdfStateRef.current.get(pdfId);
+          if (prev === undefined || prev !== updatedAt) {
+            notifyPdfReady();
+            break;
+          }
+        }
+      } else if (newPdfState.size === 0) {
+        // First load with no PDFs — just initialize
+      }
+      prevPdfStateRef.current = newPdfState;
+
       setProject(proj);
       setFiles(f);
       setConversations(c);
@@ -49,6 +72,10 @@ export function EstudioProjectPage() {
 
   useEffect(() => {
     loadProject();
+    // Request notification permission on first visit
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
   }, [loadProject]);
 
   const handleFilesChange = useCallback(() => {
@@ -432,4 +459,46 @@ function isTextFile(mimeType: string): boolean {
     mimeType === "application/json" ||
     mimeType === "application/javascript"
   );
+}
+
+/** Notify user that a PDF is ready — sound + browser notification (works in background tabs) */
+function notifyPdfReady() {
+  // 1. Browser notification (works in background tabs, has system sound)
+  try {
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("PDF pronto!", {
+        body: "O documento foi compilado com sucesso.",
+        icon: "/favicon.ico",
+        tag: "pdf-ready", // Deduplicates if multiple PDFs compile fast
+      });
+    }
+  } catch {
+    // Notification API not available
+  }
+
+  // 2. Audio chime (works in foreground, best-effort in background)
+  try {
+    const ctx = new AudioContext();
+    // Resume in case browser suspended it (background tab policy)
+    ctx.resume().then(() => {
+      const now = ctx.currentTime;
+      // Two-tone chime: C5 → E5
+      const notes = [523.25, 659.25];
+      for (let i = 0; i < notes.length; i++) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = notes[i];
+        gain.gain.setValueAtTime(0.3, now + i * 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + i * 0.15);
+        osc.stop(now + i * 0.15 + 0.4);
+      }
+      setTimeout(() => ctx.close(), 1000);
+    });
+  } catch {
+    // AudioContext not available
+  }
 }

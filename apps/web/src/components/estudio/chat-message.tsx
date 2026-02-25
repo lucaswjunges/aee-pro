@@ -224,7 +224,11 @@ function ToolCallGroup({ pairs, autoAccept, onUndoFile, isFromHistory }: { pairs
   );
   const [expanded, setExpanded] = useState(hasReviewableTools && !isFromHistory);
   const completedCount = pairs.filter((p) => p.completed).length;
-  const hasErrors = pairs.some((p) => p.result && !p.result.success);
+  // If ANY compile_latex succeeded → green (even if earlier attempts failed, the goal was achieved)
+  const hasCompileSuccess = pairs.some(
+    (p) => p.tool === "compile_latex" && p.result?.success
+  );
+  const hasErrors = !hasCompileSuccess && pairs.some((p) => p.result && !p.result.success);
   const allDone = completedCount === pairs.length && pairs.length > 0;
 
   // Build hover tooltip summarizing all tool operations
@@ -513,6 +517,7 @@ function getToolIcon(tool: string) {
     edit_file: FileEdit,
     list_files: FolderOpen,
     delete_file: Trash2,
+    rename_file: FileEdit,
     search_files: Search,
     compile_latex: Cpu,
     get_student_data: Database,
@@ -528,6 +533,7 @@ function toolDisplayName(tool: string): string {
     edit_file: "Editando arquivo",
     list_files: "Listando arquivos",
     delete_file: "Removendo arquivo",
+    rename_file: "Renomeando arquivo",
     search_files: "Buscando nos arquivos",
     compile_latex: "Compilando LaTeX",
     get_student_data: "Buscando dados do aluno",
@@ -547,6 +553,8 @@ function getToolDetail(tool: string, input?: Record<string, unknown>): string {
     case "delete_file":
     case "compile_latex":
       return input.path ? String(input.path) : "";
+    case "rename_file":
+      return input.old_path ? `${input.old_path} → ${input.new_path}` : "";
     case "search_files":
       return input.query ? `"${input.query}"` : "";
     case "get_prompt_template":
