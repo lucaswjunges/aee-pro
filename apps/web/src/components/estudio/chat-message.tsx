@@ -19,6 +19,7 @@ import {
   Undo2,
   CheckCircle2,
   XCircle,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ interface RawSSEEvent {
 }
 
 interface ChatMessageProps {
+  id?: string;
   role: "user" | "assistant";
   content: string;
   toolCalls?: RawSSEEvent[];
@@ -45,9 +47,16 @@ interface ChatMessageProps {
   autoAccept?: boolean;
   /** Callback to undo a file modification by restoring a previous version */
   onUndoFile?: (fileId: string, versionId: string) => Promise<void>;
+  /** Callback to delete this message */
+  onDelete?: (id: string) => void;
+  /** Callback to regenerate this assistant message */
+  onRegenerate?: (id: string) => void;
+  /** Whether any message is currently streaming (disables actions) */
+  globalStreaming?: boolean;
 }
 
 export function ChatMessage({
+  id,
   role,
   content,
   toolCalls,
@@ -56,8 +65,12 @@ export function ChatMessage({
   liveStreaming,
   autoAccept,
   onUndoFile,
+  onDelete,
+  onRegenerate,
+  globalStreaming,
 }: ChatMessageProps) {
   const isUser = role === "user";
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Group tool_call + tool_result pairs.
   // For stored/finalized messages (not live streaming), force all pairs as completed
@@ -67,10 +80,13 @@ export function ChatMessage({
   // Messages loaded from history default to accepted (no review buttons)
   const isFromHistory = !liveStreaming && !isStreaming;
 
+  // Show action buttons only on finalized messages (not streaming)
+  const showActions = id && !liveStreaming && !isStreaming && !globalStreaming;
+
   return (
     <div
       className={cn(
-        "flex gap-3 py-4",
+        "group/msg flex gap-3 py-4",
         isUser ? "flex-row-reverse" : "flex-row"
       )}
     >
@@ -130,6 +146,60 @@ export function ChatMessage({
             <span className="h-2 w-2 rounded-full bg-violet-500 animate-bounce" />
             <span className="h-2 w-2 rounded-full bg-violet-500 animate-bounce [animation-delay:0.15s]" />
             <span className="h-2 w-2 rounded-full bg-violet-500 animate-bounce [animation-delay:0.3s]" />
+          </div>
+        )}
+
+        {/* Action buttons (visible on hover) */}
+        {showActions && (
+          <div
+            className={cn(
+              "flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity",
+              isUser ? "flex-row-reverse" : "flex-row"
+            )}
+          >
+            {confirmDelete ? (
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className="text-muted-foreground">Apagar?</span>
+                <button
+                  onClick={() => {
+                    onDelete?.(id);
+                    setConfirmDelete(false);
+                  }}
+                  className="px-1.5 py-0.5 rounded text-red-600 dark:text-red-400 hover:bg-red-500/15 font-medium"
+                >
+                  Sim
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-1.5 py-0.5 rounded text-muted-foreground hover:bg-muted font-medium"
+                >
+                  Não
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Regenerate — assistant only */}
+                {!isUser && onRegenerate && (
+                  <button
+                    onClick={() => onRegenerate(id)}
+                    className="p-1 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-muted transition-colors"
+                    title="Regenerar resposta"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {/* Delete */}
+                {onDelete && (
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    className="p-1 rounded-md text-muted-foreground/60 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                    title={isUser ? "Apagar mensagem e resposta" : "Apagar mensagem"}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

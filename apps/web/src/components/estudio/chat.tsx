@@ -194,6 +194,163 @@ export function Chat({
   // Debounce file refreshes — collapses rapid tool_result events into one refresh
   const debouncedFilesChange = useDebouncedCallback(onFilesChange, 600);
 
+  // --- Delete message ---
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    try {
+      const res = await api.delete<{ deletedIds: string[] }>(
+        `/workspace/projects/${projectId}/messages/${messageId}`
+      );
+      if (res.success && res.data?.deletedIds) {
+        const deletedSet = new Set(res.data.deletedIds);
+        setMessages((prev) => prev.filter((m) => !deletedSet.has(m.id)));
+      }
+    } catch (err) {
+      console.error("Failed to delete message:", err);
+    }
+  }, [projectId]);
+
+  // --- Regenerate assistant message ---
+  const handleRegenerate = useCallback(async (messageId: string) => {
+    if (isStreaming) return;
+
+    // Remove the message from local state
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+
+    // Start streaming the regenerated response
+    setCurrentSuggestion("");
+    setIsStreaming(true);
+    isStreamingRef.current = true;
+    setIsThinking(false);
+    setStreamText("");
+    setStreamToolCalls([]);
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    try {
+      const token = api.getToken();
+      const res = await fetch(
+        `${API_BASE}/workspace/projects/${projectId}/messages/${messageId}/regenerate`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          signal: abortController.signal,
+        }
+      );
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: "Erro desconhecido" }));
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: `Erro: ${(error as { error?: string }).error || res.statusText}`,
+          },
+        ]);
+        setIsStreaming(false);
+        isStreamingRef.current = false;
+        return;
+      }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+      const allToolCalls: SSEEvent[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (!data) continue;
+
+          try {
+            const event: SSEEvent = JSON.parse(data);
+
+            if (event.type === "text" && event.content) {
+              fullText += event.content;
+              setStreamText(fullText);
+              setIsThinking(false);
+            } else if (
+              event.type === "tool_call" ||
+              event.type === "tool_result" ||
+              event.type === "agent_spawn" ||
+              event.type === "agent_result"
+            ) {
+              allToolCalls.push(event);
+              setStreamToolCalls([...allToolCalls]);
+              setIsThinking(false);
+              if (event.type === "tool_result") {
+                const tool = event.tool || "";
+                if (["write_file", "edit_file", "delete_file", "compile_latex"].includes(tool)) {
+                  debouncedFilesChange();
+                }
+              }
+            } else if (event.type === "thinking") {
+              setIsThinking(true);
+            } else if (event.type === "error") {
+              fullText += `\n\nErro: ${event.content}`;
+              setStreamText(fullText);
+              setIsThinking(false);
+            } else if (event.type === "done") {
+              setIsThinking(false);
+              debouncedFilesChange.flush();
+              onFilesChange();
+            }
+          } catch {
+            // Ignore malformed SSE
+          }
+        }
+      }
+
+      // Finalize assistant message
+      const assistantMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: fullText,
+        toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+      setStreamText("");
+      setStreamToolCalls([]);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        const partial: Message = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: streamText + "\n\n*(interrompido pelo usuário)*",
+        };
+        setMessages((prev) => [...prev, partial]);
+        setStreamText("");
+        setStreamToolCalls([]);
+      } else {
+        const msg = err instanceof Error ? err.message : "Erro de conexão";
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: "assistant", content: `Erro: ${msg}` },
+        ]);
+      }
+    } finally {
+      setIsStreaming(false);
+      isStreamingRef.current = false;
+      setIsThinking(false);
+      abortControllerRef.current = null;
+      setTimeout(() => textareaRef.current?.focus(), 50);
+      fetchAISuggestion(conversationId);
+    }
+  }, [projectId, isStreaming, conversationId, debouncedFilesChange, onFilesChange, fetchAISuggestion, streamText]);
+
   // Load existing messages (skip while streaming to avoid overwriting live state)
   useEffect(() => {
     if (!conversationId) return;
@@ -213,7 +370,7 @@ export function Chat({
         if (res.success && res.data) {
           setMessages(
             res.data
-              .filter((m) => m.role === "user" || m.role === "assistant")
+              .filter((m) => (m.role === "user" || m.role === "assistant") && m.content && m.content !== "(processando...)")
               .map((m) => ({
                 id: m.id,
                 role: m.role as "user" | "assistant",
@@ -516,11 +673,15 @@ export function Chat({
             {messages.map((msg) => (
               <ChatMessage
                 key={msg.id}
+                id={msg.id}
                 role={msg.role}
                 content={msg.content}
                 toolCalls={msg.toolCalls}
                 autoAccept={autoAccept}
                 onUndoFile={handleUndoFile}
+                onDelete={handleDeleteMessage}
+                onRegenerate={handleRegenerate}
+                globalStreaming={isStreaming}
               />
             ))}
             {isStreaming && (

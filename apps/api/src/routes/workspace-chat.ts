@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, gt } from "drizzle-orm";
 import {
   workspaceProjects,
   workspaceFiles,
@@ -12,6 +12,7 @@ import { createDb } from "../db/index";
 import { authMiddleware } from "../middleware/auth";
 import { decrypt } from "../lib/encryption";
 import { runAgentLoop } from "../lib/agent/loop";
+import type { ToolExecContext } from "../lib/agent/tool-executor";
 import { createAIProvider } from "../lib/ai";
 import type { AIMessage } from "../lib/ai";
 import type { Env } from "../index";
@@ -267,164 +268,310 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
     }
   }
 
-  // Shared mutable state for collecting the assistant response
-  const assistantTextParts: string[] = [];
-  const toolCallsData: unknown[] = [];
-  let saved = false;
+  // --- Progressive save: INSERT now, UPDATE periodically, UPDATE final ---
+  return createStreamingAgentResponse({
+    db, c, conversationId: conversationId!, projectId,
+    settings, apiKey, project, studentInfo, files,
+    claudeMessages, conversationSummary,
+    toolCtx: {
+      db,
+      r2: c.env.R2,
+      userId,
+      projectId,
+      compilerUrl: c.env.LATEX_COMPILER_URL,
+      compilerToken: c.env.LATEX_COMPILER_TOKEN,
+    },
+  });
+});
 
-  /** Persist assistant message + update timestamps */
-  async function saveAssistantMessage() {
-    if (saved) return;
-    saved = true;
-    try {
-      const text = assistantTextParts.join("");
-      const toolCalls = toolCallsData;
-      if (text || toolCalls.length > 0) {
-        await db.insert(workspaceMessages).values({
-          id: crypto.randomUUID(),
-          conversationId: conversationId!,
-          role: "assistant",
-          content: text || "(tool calls only)",
-          toolCalls: toolCalls.length > 0 ? JSON.stringify(toolCalls) : null,
-          createdAt: new Date().toISOString(),
-        });
-        console.log(`[workspace-chat] Saved assistant message (${text.length} chars, ${toolCalls.length} tool events)`);
-      } else {
-        console.log("[workspace-chat] Nothing to save (no text, no tool calls)");
-      }
-      const now = new Date().toISOString();
+// ---------- DELETE /projects/:id/messages/:messageId — delete a message ----------
+
+workspaceChatRoutes.delete("/projects/:id/messages/:messageId", async (c) => {
+  const userId = c.get("userId");
+  const projectId = c.req.param("id");
+  const messageId = c.req.param("messageId");
+  const db = createDb(c.env.DB);
+
+  // Verify project ownership
+  const project = await db
+    .select()
+    .from(workspaceProjects)
+    .where(
+      and(
+        eq(workspaceProjects.id, projectId),
+        eq(workspaceProjects.userId, userId)
+      )
+    )
+    .get();
+
+  if (!project) {
+    return c.json({ success: false, error: "Projeto não encontrado" }, 404);
+  }
+
+  // Find the message and verify it belongs to this project's conversation
+  const message = await db
+    .select()
+    .from(workspaceMessages)
+    .where(eq(workspaceMessages.id, messageId))
+    .get();
+
+  if (!message) {
+    return c.json({ success: false, error: "Mensagem não encontrada" }, 404);
+  }
+
+  // Verify conversation belongs to this project
+  const conversation = await db
+    .select()
+    .from(workspaceConversations)
+    .where(
+      and(
+        eq(workspaceConversations.id, message.conversationId),
+        eq(workspaceConversations.projectId, projectId)
+      )
+    )
+    .get();
+
+  if (!conversation) {
+    return c.json({ success: false, error: "Mensagem não pertence a este projeto" }, 403);
+  }
+
+  const deletedIds: string[] = [messageId];
+
+  // If user message, also delete the next assistant message (orphaned response)
+  if (message.role === "user") {
+    const nextAssistant = await db
+      .select()
+      .from(workspaceMessages)
+      .where(
+        and(
+          eq(workspaceMessages.conversationId, message.conversationId),
+          gt(workspaceMessages.createdAt, message.createdAt)
+        )
+      )
+      .orderBy(workspaceMessages.createdAt)
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    if (nextAssistant && nextAssistant.role === "assistant") {
       await db
-        .update(workspaceConversations)
-        .set({ updatedAt: now })
-        .where(eq(workspaceConversations.id, conversationId!));
-      await db
-        .update(workspaceProjects)
-        .set({ updatedAt: now })
-        .where(eq(workspaceProjects.id, projectId));
-    } catch (err) {
-      console.error("[workspace-chat] Failed to save assistant message:", err);
+        .delete(workspaceMessages)
+        .where(eq(workspaceMessages.id, nextAssistant.id));
+      deletedIds.push(nextAssistant.id);
     }
   }
 
-  // Stream response via SSE
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      let streamCancelled = false;
+  // Delete the target message
+  await db.delete(workspaceMessages).where(eq(workspaceMessages.id, messageId));
 
-      function safeSend(chunk: string) {
-        if (streamCancelled) return;
+  return c.json({ success: true, data: { deletedIds } });
+});
+
+// ---------- POST /projects/:id/messages/:messageId/regenerate — regenerate assistant response ----------
+
+workspaceChatRoutes.post("/projects/:id/messages/:messageId/regenerate", async (c) => {
+  const userId = c.get("userId");
+  const projectId = c.req.param("id");
+  const messageId = c.req.param("messageId");
+  const db = createDb(c.env.DB);
+
+  // Verify project ownership
+  const project = await db
+    .select()
+    .from(workspaceProjects)
+    .where(
+      and(
+        eq(workspaceProjects.id, projectId),
+        eq(workspaceProjects.userId, userId)
+      )
+    )
+    .get();
+
+  if (!project) {
+    return c.json({ success: false, error: "Projeto não encontrado" }, 404);
+  }
+
+  // Find the assistant message to regenerate
+  const message = await db
+    .select()
+    .from(workspaceMessages)
+    .where(eq(workspaceMessages.id, messageId))
+    .get();
+
+  if (!message || message.role !== "assistant") {
+    return c.json({ success: false, error: "Mensagem assistant não encontrada" }, 404);
+  }
+
+  // Verify conversation belongs to this project
+  const conversation = await db
+    .select()
+    .from(workspaceConversations)
+    .where(
+      and(
+        eq(workspaceConversations.id, message.conversationId),
+        eq(workspaceConversations.projectId, projectId)
+      )
+    )
+    .get();
+
+  if (!conversation) {
+    return c.json({ success: false, error: "Mensagem não pertence a este projeto" }, 403);
+  }
+
+  const conversationId = message.conversationId;
+
+  // Delete the old assistant message
+  await db.delete(workspaceMessages).where(eq(workspaceMessages.id, messageId));
+
+  // Get user's AI settings
+  const settings = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId))
+    .get();
+
+  if (!settings?.aiApiKeyEncrypted || !settings?.aiProvider) {
+    return c.json(
+      { success: false, error: "Configure sua chave de IA em Configurações antes de usar o Estúdio." },
+      400
+    );
+  }
+
+  let apiKey: string;
+  try {
+    apiKey = await decrypt(settings.aiApiKeyEncrypted, c.env.SESSION_SECRET);
+  } catch {
+    return c.json({ success: false, error: "Erro ao descriptografar chave de IA." }, 500);
+  }
+
+  // Fetch conversation history (now without the deleted assistant message)
+  const history = await db
+    .select()
+    .from(workspaceMessages)
+    .where(eq(workspaceMessages.conversationId, conversationId))
+    .orderBy(workspaceMessages.createdAt)
+    .limit(40);
+
+  // Smart history windowing (same as POST /chat)
+  const KEEP_RECENT = 10;
+  let conversationSummary: string | undefined;
+  let messagesToConvert = history;
+
+  if (history.length > KEEP_RECENT) {
+    const olderMessages = history.slice(0, history.length - KEEP_RECENT);
+    const recentMessages = history.slice(history.length - KEEP_RECENT);
+
+    const summaryParts: string[] = [];
+    for (const msg of olderMessages) {
+      if (msg.role === "user") {
+        summaryParts.push(`Professora: ${msg.content.slice(0, 150)}${msg.content.length > 150 ? "…" : ""}`);
+      } else if (msg.role === "assistant") {
+        const brief = msg.content.slice(0, 100);
+        summaryParts.push(`Assistente: ${brief}${msg.content.length > 100 ? "…" : ""}${msg.toolCalls ? " (+ tools)" : ""}`);
+      }
+    }
+    conversationSummary = summaryParts.join("\n");
+    messagesToConvert = recentMessages;
+  }
+
+  // Build messages array for the AI (same logic as POST /chat)
+  const claudeMessages = messagesToConvert
+    .map((msg) => {
+      if (msg.role === "tool_result") return null;
+      if (msg.role === "assistant" && msg.toolCalls) {
+        const parts: string[] = [];
+        if (msg.content && msg.content !== "(tool calls only)") {
+          parts.push(msg.content);
+        }
         try {
-          controller.enqueue(encoder.encode(chunk));
-        } catch {
-          streamCancelled = true;
-        }
+          const events = JSON.parse(msg.toolCalls) as Array<{
+            type: string;
+            tool?: string;
+            toolInput?: Record<string, unknown>;
+            result?: unknown;
+            content?: string;
+            agentTask?: string;
+            agentId?: string;
+          }>;
+
+          const completedAgentIds = new Set(
+            events.filter((e) => e.type === "agent_result" && e.agentId).map((e) => e.agentId!)
+          );
+
+          for (const ev of events) {
+            if (ev.type === "tool_call" && ev.tool) {
+              const inputSummary = ev.toolInput
+                ? Object.entries(ev.toolInput)
+                    .map(([k, v]) => {
+                      const val = typeof v === "string" ? v : JSON.stringify(v);
+                      return `${k}: ${val.length > 100 ? val.slice(0, 100) + "…" : val}`;
+                    })
+                    .join(", ")
+                : "";
+              parts.push(`[Executei ${ev.tool}(${inputSummary})]`);
+            } else if (ev.type === "tool_result" && ev.tool) {
+              const resultStr =
+                typeof ev.result === "string"
+                  ? ev.result
+                  : ev.result && typeof ev.result === "object" && "output" in (ev.result as Record<string, unknown>)
+                    ? String((ev.result as Record<string, unknown>).output)
+                    : JSON.stringify(ev.result);
+              parts.push(
+                `[Resultado ${ev.tool}: ${resultStr.length > 300 ? resultStr.slice(0, 300) + "…" : resultStr}]`
+              );
+            } else if (ev.type === "agent_spawn") {
+              const hasResult = ev.agentId && completedAgentIds.has(ev.agentId);
+              if (hasResult) {
+                parts.push(`[Iniciei sub-agente: ${ev.agentTask || "tarefa"}]`);
+              } else {
+                parts.push(`[Sub-agente INTERROMPIDO — NÃO completou: ${ev.agentTask || "tarefa"}. A tarefa precisa ser refeita.]`);
+              }
+            } else if (ev.type === "agent_result") {
+              const res = ev.content || "";
+              parts.push(
+                `[Resultado sub-agente: ${res.length > 300 ? res.slice(0, 300) + "…" : res}]`
+              );
+            }
+          }
+        } catch { /* ignore */ }
+        const summary = parts.join("\n");
+        if (!summary.trim()) return null;
+        return { role: "assistant" as const, content: summary };
       }
-
-      try {
-        const providerType = settings.aiProvider!;
-        const agentLoop = runAgentLoop({
-          apiKey,
-          providerType,
-          model: normalizeModel(settings.aiModel || getDefaultModel(providerType)),
-          project: {
-            id: project.id,
-            name: project.name,
-            description: project.description,
-            studentId: project.studentId,
-          },
-          student: studentInfo,
-          files,
-          messages: claudeMessages,
-          toolCtx: {
-            db,
-            r2: c.env.R2,
-            userId,
-            projectId,
-            compilerUrl: c.env.LATEX_COMPILER_URL,
-            compilerToken: c.env.LATEX_COMPILER_TOKEN,
-          },
-          enableThinking: providerType === "anthropic",
-          conversationSummary,
-          maxOutputTokens: settings.maxOutputTokens || undefined,
-        });
-
-        for await (const event of agentLoop) {
-          // Collect data for saving
-          if (event.type === "text" && event.content) {
-            assistantTextParts.push(event.content);
-          }
-          if (event.type === "error" && event.content) {
-            // Persist error messages so they survive page reload
-            assistantTextParts.push(`\n\nErro: ${event.content}`);
-          }
-          if (
-            event.type === "tool_call" ||
-            event.type === "tool_result" ||
-            event.type === "agent_spawn" ||
-            event.type === "agent_result"
-          ) {
-            toolCallsData.push(event);
-          }
-
-          // Save to DB BEFORE sending "done" to the client, so that when the
-          // frontend calls loadProject() in response to "done", the assistant
-          // message is already persisted.
-          if (event.type === "done") {
-            await saveAssistantMessage();
-          }
-
-          const sseData = JSON.stringify(event);
-          safeSend(`data: ${sseData}\n\n`);
-          safeSend(": flush\n\n");
-        }
-
-        // Ensure save even if the loop ended without a "done" event
-        // (e.g. AI API error yields "error" then returns without "done")
-        await saveAssistantMessage();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error("[workspace-chat] Agent loop error:", msg);
-        assistantTextParts.push(`\n\nErro: ${msg}`);
-        // Save partial response before sending error to client
-        await saveAssistantMessage();
-        safeSend(
-          `data: ${JSON.stringify({ type: "error", content: msg })}\n\n`
-        );
-      }
-
-      try { controller.close(); } catch { /* stream already cancelled */ }
-    },
-  });
-
-  // Keep worker alive until save completes — even if the client disconnects
-  // or the stream is cancelled, the save MUST finish.
-  // 120s timeout: sub-agents can take 30-90s each (parallel), plus compilation.
-  c.executionCtx.waitUntil(
-    new Promise<void>((resolve) => {
-      const start = Date.now();
-      const TIMEOUT_MS = 120_000;
-      const check = () => {
-        if (saved || Date.now() - start > TIMEOUT_MS) {
-          if (!saved) {
-            saveAssistantMessage().finally(resolve);
-          } else {
-            resolve();
-          }
-        } else {
-          setTimeout(check, 500);
-        }
-      };
-      check();
+      return { role: msg.role as "user" | "assistant", content: msg.content };
     })
-  );
+    .filter((m): m is NonNullable<typeof m> => m !== null);
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "Access-Control-Allow-Origin": "*",
+  // Get project files
+  const files = await db
+    .select()
+    .from(workspaceFiles)
+    .where(eq(workspaceFiles.projectId, projectId));
+
+  // Get student info if linked
+  let studentInfo = null;
+  if (project.studentId) {
+    const student = await db
+      .select()
+      .from(students)
+      .where(and(eq(students.id, project.studentId), eq(students.userId, userId)))
+      .get();
+    if (student) {
+      studentInfo = { name: student.name, diagnosis: student.diagnosis, grade: student.grade };
+    }
+  }
+
+  // --- Progressive save: INSERT now, UPDATE periodically, UPDATE final ---
+  return createStreamingAgentResponse({
+    db, c, conversationId, projectId,
+    settings, apiKey, project, studentInfo, files,
+    claudeMessages, conversationSummary,
+    toolCtx: {
+      db,
+      r2: c.env.R2,
+      userId,
+      projectId,
+      compilerUrl: c.env.LATEX_COMPILER_URL,
+      compilerToken: c.env.LATEX_COMPILER_TOKEN,
     },
   });
 });
@@ -460,7 +607,24 @@ workspaceChatRoutes.get("/projects/:id/messages", async (c) => {
       .where(eq(workspaceMessages.conversationId, conversationId))
       .orderBy(workspaceMessages.createdAt);
 
-    return c.json({ success: true, data: messages });
+    // Clean up orphaned progressive-save placeholders (empty or "(processando...)")
+    const orphans = messages.filter(
+      (m) => m.role === "assistant" && (!m.content || m.content === "(processando...)")
+    );
+    if (orphans.length > 0) {
+      await Promise.all(
+        orphans.map((m) =>
+          db.delete(workspaceMessages).where(eq(workspaceMessages.id, m.id))
+        )
+      );
+    }
+
+    return c.json({
+      success: true,
+      data: messages.filter(
+        (m) => m.content && m.content !== "(processando...)"
+      ),
+    });
   }
 
   // Get all conversations with latest message
@@ -616,6 +780,210 @@ ${fileList ? `\nArquivos no projeto: ${fileList}` : ""}`,
     return c.json({ success: false, data: { suggestion: null } }, 200);
   }
 });
+
+// ---------- streaming agent response (shared by /chat and /regenerate) ----------
+
+/**
+ * Creates an SSE streaming response that runs the agent loop.
+ * Progressive save: INSERT immediately → UPDATE every 3s → final UPDATE on done.
+ * Even if the Worker crashes mid-stream, partial content is already in the DB.
+ */
+async function createStreamingAgentResponse(opts: {
+  db: ReturnType<typeof createDb>;
+  c: { executionCtx: { waitUntil: (p: Promise<unknown>) => void } };
+  conversationId: string;
+  projectId: string;
+  settings: { aiProvider: string | null; aiModel: string | null; maxOutputTokens: number | null };
+  apiKey: string;
+  project: { id: string; name: string; description: string | null; studentId: string | null };
+  studentInfo: { name: string; diagnosis: string | null; grade: string | null } | null;
+  files: Parameters<typeof runAgentLoop>[0]["files"];
+  claudeMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  conversationSummary?: string;
+  toolCtx: ToolExecContext;
+}): Promise<Response> {
+  const { db, c, conversationId, projectId, settings, apiKey, project, studentInfo, files, claudeMessages, conversationSummary, toolCtx } = opts;
+
+  // --- Progressive save state ---
+  const assistantMsgId = crypto.randomUUID();
+  const assistantTextParts: string[] = [];
+  const toolCallsData: unknown[] = [];
+  let lastFlushAt = 0;
+  let finalized = false;
+  const FLUSH_INTERVAL_MS = 3_000;
+
+  // INSERT the message row immediately so it exists in DB from the start
+  await db.insert(workspaceMessages).values({
+    id: assistantMsgId,
+    conversationId,
+    role: "assistant",
+    content: "",
+    toolCalls: null,
+    createdAt: new Date().toISOString(),
+  });
+  lastFlushAt = Date.now();
+
+  /** Flush current accumulated content to DB (non-destructive UPDATE) */
+  async function flushToDb() {
+    try {
+      const text = assistantTextParts.join("");
+      const tc = toolCallsData;
+      await db
+        .update(workspaceMessages)
+        .set({
+          content: text || "(processando...)",
+          toolCalls: tc.length > 0 ? JSON.stringify(tc) : null,
+        })
+        .where(eq(workspaceMessages.id, assistantMsgId));
+      lastFlushAt = Date.now();
+    } catch (err) {
+      console.error("[workspace-chat] Flush failed:", err);
+    }
+  }
+
+  /** Periodic flush — call after each event, only writes if interval elapsed */
+  async function maybeFlush() {
+    if (Date.now() - lastFlushAt >= FLUSH_INTERVAL_MS) {
+      await flushToDb();
+    }
+  }
+
+  /** Final save: write content + update timestamps. Idempotent. */
+  async function finalizeMessage() {
+    if (finalized) return;
+    finalized = true;
+    try {
+      const text = assistantTextParts.join("");
+      const tc = toolCallsData;
+      if (!text && tc.length === 0) {
+        // Nothing was produced — remove the empty placeholder
+        await db.delete(workspaceMessages).where(eq(workspaceMessages.id, assistantMsgId));
+        return;
+      }
+      await db
+        .update(workspaceMessages)
+        .set({
+          content: text || "(tool calls only)",
+          toolCalls: tc.length > 0 ? JSON.stringify(tc) : null,
+        })
+        .where(eq(workspaceMessages.id, assistantMsgId));
+
+      const now = new Date().toISOString();
+      await db.update(workspaceConversations).set({ updatedAt: now }).where(eq(workspaceConversations.id, conversationId));
+      await db.update(workspaceProjects).set({ updatedAt: now }).where(eq(workspaceProjects.id, projectId));
+    } catch (err) {
+      console.error("[workspace-chat] Finalize failed:", err);
+    }
+  }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let streamCancelled = false;
+
+      function safeSend(chunk: string) {
+        if (streamCancelled) return;
+        try {
+          controller.enqueue(encoder.encode(chunk));
+        } catch {
+          streamCancelled = true;
+        }
+      }
+
+      try {
+        const providerType = settings.aiProvider!;
+        const agentLoop = runAgentLoop({
+          apiKey,
+          providerType,
+          model: normalizeModel(settings.aiModel || getDefaultModel(providerType)),
+          project: {
+            id: project.id,
+            name: project.name,
+            description: project.description,
+            studentId: project.studentId,
+          },
+          student: studentInfo,
+          files,
+          messages: claudeMessages,
+          toolCtx,
+          enableThinking: providerType === "anthropic",
+          conversationSummary,
+          maxOutputTokens: settings.maxOutputTokens || undefined,
+        });
+
+        for await (const event of agentLoop) {
+          // Collect data
+          if (event.type === "text" && event.content) {
+            assistantTextParts.push(event.content);
+          }
+          if (event.type === "error" && event.content) {
+            assistantTextParts.push(`\n\nErro: ${event.content}`);
+          }
+          if (
+            event.type === "tool_call" ||
+            event.type === "tool_result" ||
+            event.type === "agent_spawn" ||
+            event.type === "agent_result"
+          ) {
+            toolCallsData.push(event);
+          }
+
+          // Periodic flush to DB (every 3s)
+          await maybeFlush();
+
+          // Final save BEFORE sending "done" to client
+          if (event.type === "done") {
+            await finalizeMessage();
+          }
+
+          const sseData = JSON.stringify(event);
+          safeSend(`data: ${sseData}\n\n`);
+          safeSend(": flush\n\n");
+        }
+
+        // Fallback finalize (if loop ended without "done")
+        await finalizeMessage();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[workspace-chat] Agent loop error:", msg);
+        assistantTextParts.push(`\n\nErro: ${msg}`);
+        await finalizeMessage();
+        safeSend(`data: ${JSON.stringify({ type: "error", content: msg })}\n\n`);
+      }
+
+      try { controller.close(); } catch { /* already cancelled */ }
+    },
+  });
+
+  // Safety net: keep Worker alive until finalized
+  c.executionCtx.waitUntil(
+    new Promise<void>((resolve) => {
+      const start = Date.now();
+      const TIMEOUT_MS = 120_000;
+      const check = () => {
+        if (finalized || Date.now() - start > TIMEOUT_MS) {
+          if (!finalized) {
+            finalizeMessage().finally(resolve);
+          } else {
+            resolve();
+          }
+        } else {
+          setTimeout(check, 500);
+        }
+      };
+      check();
+    })
+  );
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
 
 // ---------- helpers ----------
 
