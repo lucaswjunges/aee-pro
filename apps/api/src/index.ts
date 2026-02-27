@@ -26,6 +26,8 @@ export type Env = {
     FRONTEND_URL: string;
     GOOGLE_CLIENT_ID?: string;
     GOOGLE_CLIENT_SECRET?: string;
+    AGENT_SERVICE_URL?: string;
+    AGENT_SERVICE_TOKEN?: string;
   };
 };
 

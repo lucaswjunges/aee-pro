@@ -6,6 +6,7 @@ import {
   workspaceConversations,
   workspaceMessages,
   students,
+  prompts,
 } from "@aee-pro/db/schema";
 import { userSettings } from "@aee-pro/db/schema";
 import { createDb } from "../db/index";
@@ -15,6 +16,9 @@ import { runAgentLoop } from "../lib/agent/loop";
 import type { ToolExecContext } from "../lib/agent/tool-executor";
 import { createAIProvider } from "../lib/ai";
 import type { AIMessage } from "../lib/ai";
+import { buildSystemPrompt } from "../lib/agent/system-prompt";
+import { packProjectFiles, syncFilesBack } from "../lib/agent/file-packager";
+import type { PackedFile } from "../lib/agent/file-packager";
 import type { Env } from "../index";
 
 type WsEnv = Env & { Variables: { userId: string } };
@@ -77,10 +81,20 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
   const body = await c.req.json<{
     message: string;
     conversationId?: string;
+    qualityMode?: "standard" | "promax";
   }>();
 
   if (!body.message?.trim()) {
     return c.json({ success: false, error: "Mensagem é obrigatória" }, 400);
+  }
+
+  // Validate Pro Max — needs agent service or a provider that can reach Claude Opus
+  const qualityMode = body.qualityMode || "standard";
+  if (qualityMode === "promax" && !c.env.AGENT_SERVICE_URL) {
+    const proMaxError = validateProMaxProvider(settings.aiProvider!);
+    if (proMaxError) {
+      return c.json({ success: false, error: proMaxError }, 400);
+    }
   }
 
   // Get or create conversation
@@ -187,6 +201,8 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
             events.filter((e) => e.type === "tool_result" && e.tool).map((e) => e.tool!)
           );
 
+          // Format as system metadata — NOT as a format for the AI to mimic.
+          // Using <hist-action> tags that the AI recognizes as read-only context.
           for (const ev of events) {
             if (ev.type === "tool_call" && ev.tool) {
               const inputSummary = ev.toolInput
@@ -197,7 +213,7 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
                     })
                     .join(", ")
                 : "";
-              parts.push(`[Executei ${ev.tool}(${inputSummary})]`);
+              parts.push(`<hist-action tool="${ev.tool}">${inputSummary}</hist-action>`);
             } else if (ev.type === "tool_result" && ev.tool) {
               const resultStr =
                 typeof ev.result === "string"
@@ -205,22 +221,19 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
                   : ev.result && typeof ev.result === "object" && "output" in (ev.result as Record<string, unknown>)
                     ? String((ev.result as Record<string, unknown>).output)
                     : JSON.stringify(ev.result);
-              parts.push(
-                `[Resultado ${ev.tool}: ${resultStr.length > 300 ? resultStr.slice(0, 300) + "…" : resultStr}]`
-              );
+              const truncated = resultStr.length > 300 ? resultStr.slice(0, 300) + "…" : resultStr;
+              parts.push(`<hist-result tool="${ev.tool}">${truncated}</hist-result>`);
             } else if (ev.type === "agent_spawn") {
               const hasResult = ev.agentId && completedAgentIds.has(ev.agentId);
               if (hasResult) {
-                parts.push(`[Iniciei sub-agente: ${ev.agentTask || "tarefa"}]`);
+                parts.push(`<hist-action tool="sub-agente">${ev.agentTask || "tarefa"}</hist-action>`);
               } else {
-                // Agent was started but NEVER completed (stream interrupted)
-                parts.push(`[Sub-agente INTERROMPIDO — NÃO completou: ${ev.agentTask || "tarefa"}. A tarefa precisa ser refeita.]`);
+                parts.push(`<hist-action tool="sub-agente" status="INTERROMPIDO">${ev.agentTask || "tarefa"} — precisa ser refeita</hist-action>`);
               }
             } else if (ev.type === "agent_result") {
               const res = ev.content || "";
-              parts.push(
-                `[Resultado sub-agente: ${res.length > 300 ? res.slice(0, 300) + "…" : res}]`
-              );
+              const truncated = res.length > 300 ? res.slice(0, 300) + "…" : res;
+              parts.push(`<hist-result tool="sub-agente">${truncated}</hist-result>`);
             }
           }
         } catch {
@@ -269,10 +282,11 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
   }
 
   // --- Progressive save: INSERT now, UPDATE periodically, UPDATE final ---
+  console.log(`[chat] qualityMode=${qualityMode}, AGENT_SERVICE_URL=${c.env.AGENT_SERVICE_URL || "NOT SET"}`);
   return createStreamingAgentResponse({
-    db, c, conversationId: conversationId!, projectId,
+    db, c, conversationId: conversationId!, projectId, userId,
     settings, apiKey, project, studentInfo, files,
-    claudeMessages, conversationSummary,
+    claudeMessages, conversationSummary, qualityMode,
     toolCtx: {
       db,
       r2: c.env.R2,
@@ -280,6 +294,9 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
       projectId,
       compilerUrl: c.env.LATEX_COMPILER_URL,
       compilerToken: c.env.LATEX_COMPILER_TOKEN,
+      aiApiKey: apiKey,
+      aiProvider: settings.aiProvider!,
+      qualityMode,
     },
   });
 });
@@ -374,6 +391,10 @@ workspaceChatRoutes.post("/projects/:id/messages/:messageId/regenerate", async (
   const messageId = c.req.param("messageId");
   const db = createDb(c.env.DB);
 
+  // Parse optional body (qualityMode)
+  const regenBody = await c.req.json<{ qualityMode?: "standard" | "promax" }>().catch(() => ({}));
+  const regenQualityMode = (regenBody as { qualityMode?: string }).qualityMode === "promax" ? "promax" as const : "standard" as const;
+
   // Verify project ownership
   const project = await db
     .select()
@@ -397,30 +418,50 @@ workspaceChatRoutes.post("/projects/:id/messages/:messageId/regenerate", async (
     .where(eq(workspaceMessages.id, messageId))
     .get();
 
-  if (!message || message.role !== "assistant") {
-    return c.json({ success: false, error: "Mensagem assistant não encontrada" }, 404);
-  }
+  let conversationId: string;
 
-  // Verify conversation belongs to this project
-  const conversation = await db
-    .select()
-    .from(workspaceConversations)
-    .where(
-      and(
-        eq(workspaceConversations.id, message.conversationId),
-        eq(workspaceConversations.projectId, projectId)
+  if (message) {
+    // Message exists — verify it's an assistant message
+    if (message.role !== "assistant") {
+      return c.json({ success: false, error: "Só é possível regenerar mensagens do assistente" }, 400);
+    }
+
+    // Verify conversation belongs to this project
+    const conversation = await db
+      .select()
+      .from(workspaceConversations)
+      .where(
+        and(
+          eq(workspaceConversations.id, message.conversationId),
+          eq(workspaceConversations.projectId, projectId)
+        )
       )
-    )
-    .get();
+      .get();
 
-  if (!conversation) {
-    return c.json({ success: false, error: "Mensagem não pertence a este projeto" }, 403);
+    if (!conversation) {
+      return c.json({ success: false, error: "Mensagem não pertence a este projeto" }, 403);
+    }
+
+    conversationId = message.conversationId;
+
+    // Delete the old assistant message
+    await db.delete(workspaceMessages).where(eq(workspaceMessages.id, messageId));
+  } else {
+    // Message was already deleted (orphan cleanup or race condition)
+    // Fall back to the latest conversation for this project
+    const latestConvo = await db
+      .select()
+      .from(workspaceConversations)
+      .where(eq(workspaceConversations.projectId, projectId))
+      .orderBy(desc(workspaceConversations.updatedAt))
+      .get();
+
+    if (!latestConvo) {
+      return c.json({ success: false, error: "Nenhuma conversa encontrada no projeto" }, 404);
+    }
+
+    conversationId = latestConvo.id;
   }
-
-  const conversationId = message.conversationId;
-
-  // Delete the old assistant message
-  await db.delete(workspaceMessages).where(eq(workspaceMessages.id, messageId));
 
   // Get user's AI settings
   const settings = await db
@@ -560,11 +601,20 @@ workspaceChatRoutes.post("/projects/:id/messages/:messageId/regenerate", async (
     }
   }
 
+  // Validate Pro Max — needs agent service or a provider that can reach Claude Opus
+  if (regenQualityMode === "promax" && !c.env.AGENT_SERVICE_URL) {
+    const proMaxError = validateProMaxProvider(settings.aiProvider!);
+    if (proMaxError) {
+      return c.json({ success: false, error: proMaxError }, 400);
+    }
+  }
+
   // --- Progressive save: INSERT now, UPDATE periodically, UPDATE final ---
   return createStreamingAgentResponse({
-    db, c, conversationId, projectId,
+    db, c, conversationId, projectId, userId,
     settings, apiKey, project, studentInfo, files,
     claudeMessages, conversationSummary,
+    qualityMode: regenQualityMode,
     toolCtx: {
       db,
       r2: c.env.R2,
@@ -572,6 +622,9 @@ workspaceChatRoutes.post("/projects/:id/messages/:messageId/regenerate", async (
       projectId,
       compilerUrl: c.env.LATEX_COMPILER_URL,
       compilerToken: c.env.LATEX_COMPILER_TOKEN,
+      aiApiKey: apiKey,
+      aiProvider: settings.aiProvider!,
+      qualityMode: regenQualityMode,
     },
   });
 });
@@ -790,9 +843,10 @@ ${fileList ? `\nArquivos no projeto: ${fileList}` : ""}`,
  */
 async function createStreamingAgentResponse(opts: {
   db: ReturnType<typeof createDb>;
-  c: { executionCtx: { waitUntil: (p: Promise<unknown>) => void } };
+  c: { executionCtx: { waitUntil: (p: Promise<unknown>) => void }; env?: { AGENT_SERVICE_URL?: string; AGENT_SERVICE_TOKEN?: string; R2?: R2Bucket; DB?: D1Database } };
   conversationId: string;
   projectId: string;
+  userId: string;
   settings: { aiProvider: string | null; aiModel: string | null; maxOutputTokens: number | null };
   apiKey: string;
   project: { id: string; name: string; description: string | null; studentId: string | null };
@@ -800,9 +854,22 @@ async function createStreamingAgentResponse(opts: {
   files: Parameters<typeof runAgentLoop>[0]["files"];
   claudeMessages: Array<{ role: "user" | "assistant"; content: string }>;
   conversationSummary?: string;
+  qualityMode?: "standard" | "promax";
   toolCtx: ToolExecContext;
 }): Promise<Response> {
-  const { db, c, conversationId, projectId, settings, apiKey, project, studentInfo, files, claudeMessages, conversationSummary, toolCtx } = opts;
+  const { db, c, conversationId, projectId, userId, settings, apiKey, project, studentInfo, files, claudeMessages, conversationSummary, qualityMode, toolCtx } = opts;
+
+  // --- Pro Max via Fly.io Agent Service ---
+  console.log(`[streaming] qualityMode=${qualityMode}, AGENT_SERVICE_URL=${c.env?.AGENT_SERVICE_URL || "NOT SET"}`);
+  if (qualityMode === "promax" && c.env?.AGENT_SERVICE_URL) {
+    console.log("[streaming] → Routing to Agent Service (Pro Max)");
+
+    return createProMaxAgentResponse({
+      db, c: c as { executionCtx: { waitUntil: (p: Promise<unknown>) => void }; env: { AGENT_SERVICE_URL: string; AGENT_SERVICE_TOKEN?: string; R2: R2Bucket; DB: D1Database } },
+      conversationId, projectId, userId, project, studentInfo, files,
+      claudeMessages, conversationSummary,
+    });
+  }
 
   // --- Progressive save state ---
   const assistantMsgId = crypto.randomUUID();
@@ -892,10 +959,20 @@ async function createStreamingAgentResponse(opts: {
 
       try {
         const providerType = settings.aiProvider!;
+        const isProMax = qualityMode === "promax";
+        // Pro Max forces Claude Opus and 32K output
+        const model = isProMax
+          ? getProMaxModel(providerType)
+          : normalizeModel(settings.aiModel || getDefaultModel(providerType));
+        // Pro Max: 32K for direct Anthropic, 16K for OpenRouter (cheaper)
+        const maxOut = isProMax
+          ? (providerType === "anthropic" ? 32000 : 16000)
+          : (settings.maxOutputTokens || undefined);
+
         const agentLoop = runAgentLoop({
           apiKey,
           providerType,
-          model: normalizeModel(settings.aiModel || getDefaultModel(providerType)),
+          model,
           project: {
             id: project.id,
             name: project.name,
@@ -908,7 +985,8 @@ async function createStreamingAgentResponse(opts: {
           toolCtx,
           enableThinking: providerType === "anthropic",
           conversationSummary,
-          maxOutputTokens: settings.maxOutputTokens || undefined,
+          maxOutputTokens: maxOut,
+          qualityMode,
         });
 
         for await (const event of agentLoop) {
@@ -985,6 +1063,270 @@ async function createStreamingAgentResponse(opts: {
   });
 }
 
+// ---------- Pro Max via Fly.io Agent Service ----------
+
+/**
+ * Proxy a Pro Max request to the Fly.io agent service.
+ * Packs files from R2, sends to agent service, relays SSE back to frontend,
+ * and syncs changed files back to R2/D1.
+ */
+async function createProMaxAgentResponse(opts: {
+  db: ReturnType<typeof createDb>;
+  c: {
+    executionCtx: { waitUntil: (p: Promise<unknown>) => void };
+    env: { AGENT_SERVICE_URL: string; AGENT_SERVICE_TOKEN?: string; R2: R2Bucket; DB: D1Database };
+  };
+  conversationId: string;
+  projectId: string;
+  userId: string;
+  project: { id: string; name: string; description: string | null; studentId: string | null };
+  studentInfo: { name: string; diagnosis: string | null; grade: string | null } | null;
+  files: Array<{ path: string; mimeType: string; sizeBytes: number | null }>;
+  claudeMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  conversationSummary?: string;
+}): Promise<Response> {
+  const { db, c, conversationId, projectId, userId, project, studentInfo, files, claudeMessages, conversationSummary } = opts;
+
+  // --- Progressive save state ---
+  const assistantMsgId = crypto.randomUUID();
+  const assistantTextParts: string[] = [];
+  const toolCallsData: unknown[] = [];
+  let lastFlushAt = 0;
+  let finalized = false;
+  const FLUSH_INTERVAL_MS = 3_000;
+
+  await db.insert(workspaceMessages).values({
+    id: assistantMsgId,
+    conversationId,
+    role: "assistant",
+    content: "",
+    toolCalls: null,
+    createdAt: new Date().toISOString(),
+  });
+  lastFlushAt = Date.now();
+
+  async function flushToDb() {
+    try {
+      const text = assistantTextParts.join("");
+      const tc = toolCallsData;
+      await db.update(workspaceMessages)
+        .set({ content: text || "(processando...)", toolCalls: tc.length > 0 ? JSON.stringify(tc) : null })
+        .where(eq(workspaceMessages.id, assistantMsgId));
+      lastFlushAt = Date.now();
+    } catch (err) { console.error("[promax-proxy] Flush failed:", err); }
+  }
+
+  async function maybeFlush() {
+    if (Date.now() - lastFlushAt >= FLUSH_INTERVAL_MS) await flushToDb();
+  }
+
+  async function finalizeMessage() {
+    if (finalized) return;
+    finalized = true;
+    try {
+      const text = assistantTextParts.join("");
+      const tc = toolCallsData;
+      if (!text && tc.length === 0) {
+        await db.delete(workspaceMessages).where(eq(workspaceMessages.id, assistantMsgId));
+        return;
+      }
+      await db.update(workspaceMessages)
+        .set({ content: text || "(tool calls only)", toolCalls: tc.length > 0 ? JSON.stringify(tc) : null })
+        .where(eq(workspaceMessages.id, assistantMsgId));
+      const now = new Date().toISOString();
+      await db.update(workspaceConversations).set({ updatedAt: now }).where(eq(workspaceConversations.id, conversationId));
+      await db.update(workspaceProjects).set({ updatedAt: now }).where(eq(workspaceProjects.id, projectId));
+    } catch (err) { console.error("[promax-proxy] Finalize failed:", err); }
+  }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let streamCancelled = false;
+      function safeSend(chunk: string) {
+        if (streamCancelled) return;
+        try { controller.enqueue(encoder.encode(chunk)); } catch { streamCancelled = true; }
+      }
+
+      try {
+        // 1. Pack project files from R2
+        console.log("[promax-proxy] Packing project files...");
+        const packedFiles = await packProjectFiles(projectId, userId, db, c.env.R2);
+        console.log(`[promax-proxy] Packed ${packedFiles.length} files`);
+
+        // 2. Build system prompt
+        const systemPrompt = buildSystemPrompt({
+          projectName: project.name,
+          projectDescription: project.description,
+          studentName: studentInfo?.name || null,
+          studentDiagnosis: studentInfo?.diagnosis || null,
+          studentGrade: studentInfo?.grade || null,
+          files: files as Parameters<typeof buildSystemPrompt>[0]["files"],
+          conversationSummary,
+          qualityMode: "promax",
+        });
+
+        // 3. Pre-fetch student data
+        let studentDataText: string | null = null;
+        if (project.studentId) {
+          const student = await db.select().from(students)
+            .where(and(eq(students.id, project.studentId), eq(students.userId, userId)))
+            .get();
+          if (student) {
+            studentDataText = Object.entries(student)
+              .filter(([_, v]) => v != null && v !== "")
+              .map(([k, v]) => `${k}: ${v}`)
+              .join("\n");
+          }
+        }
+
+        // 4. Pre-fetch prompt templates
+        const allPrompts = await db.select({ slug: prompts.slug, promptTemplate: prompts.promptTemplate })
+          .from(prompts)
+          .where(eq(prompts.isBuiltIn, true));
+        const promptTemplates: Record<string, string> = {};
+        for (const p of allPrompts) {
+          if (p.slug && p.promptTemplate) {
+            promptTemplates[p.slug] = p.promptTemplate;
+          }
+        }
+
+        // 5. POST to agent service
+        const agentUrl = `${c.env.AGENT_SERVICE_URL}/agent/run`;
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (c.env.AGENT_SERVICE_TOKEN) {
+          headers["Authorization"] = `Bearer ${c.env.AGENT_SERVICE_TOKEN}`;
+        }
+
+        console.log(`[promax-proxy] Sending to ${agentUrl}...`);
+        const agentResponse = await fetch(agentUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            files: packedFiles,
+            systemPrompt,
+            messages: claudeMessages,
+            studentData: studentDataText,
+            promptTemplates,
+            projectId,
+            maxTurns: 35,
+            maxThinkingTokens: 16000,
+          }),
+        });
+
+        if (!agentResponse.ok) {
+          const errText = await agentResponse.text();
+          throw new Error(`Agent service returned ${agentResponse.status}: ${errText}`);
+        }
+
+        // 6. Read SSE stream from agent service and relay to frontend
+        const reader = agentResponse.body?.getReader();
+        if (!reader) throw new Error("No response body from agent service");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE events from buffer
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const dataStr = line.slice(6);
+              let event: { type: string; content?: string; tool?: string; toolInput?: unknown; result?: string; files?: PackedFile[]; cost?: number };
+              try {
+                event = JSON.parse(dataStr);
+              } catch {
+                continue; // Skip malformed events
+              }
+
+              // Handle files_sync — consumed by Worker, not sent to frontend
+              if (event.type === "files_sync" && event.files) {
+                console.log(`[promax-proxy] Syncing ${event.files.length} files back to R2`);
+                try {
+                  const syncResult = await syncFilesBack(event.files, projectId, userId, db, c.env.R2);
+                  console.log(`[promax-proxy] Synced: ${syncResult.created} created, ${syncResult.updated} updated`);
+                } catch (syncErr) {
+                  console.error("[promax-proxy] File sync failed:", syncErr);
+                }
+                continue; // Don't forward to frontend
+              }
+
+              // Collect data for progressive save
+              if (event.type === "text" && event.content) {
+                assistantTextParts.push(event.content);
+              }
+              if (event.type === "error" && event.content) {
+                assistantTextParts.push(`\n\nErro: ${event.content}`);
+              }
+              if (event.type === "tool_call" || event.type === "tool_result") {
+                toolCallsData.push(event);
+              }
+
+              // Periodic flush
+              await maybeFlush();
+
+              // Final save before "done"
+              if (event.type === "done") {
+                await finalizeMessage();
+              }
+
+              // Relay to frontend
+              safeSend(`data: ${dataStr}\n\n`);
+              safeSend(": flush\n\n");
+            }
+            // Skip comments (keepalive) and empty lines
+          }
+        }
+
+        // Fallback finalize
+        await finalizeMessage();
+
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[promax-proxy] Error:", msg);
+        assistantTextParts.push(`\n\nErro: ${msg}`);
+        await finalizeMessage();
+        safeSend(`data: ${JSON.stringify({ type: "error", content: msg })}\n\n`);
+      }
+
+      try { controller.close(); } catch { /* already cancelled */ }
+    },
+  });
+
+  // Safety net
+  c.executionCtx.waitUntil(
+    new Promise<void>((resolve) => {
+      const start = Date.now();
+      const TIMEOUT_MS = 600_000; // 10 min for Pro Max
+      const check = () => {
+        if (finalized || Date.now() - start > TIMEOUT_MS) {
+          if (!finalized) finalizeMessage().finally(resolve);
+          else resolve();
+        } else {
+          setTimeout(check, 500);
+        }
+      };
+      check();
+    })
+  );
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
 // ---------- helpers ----------
 
 /** Normalize deprecated preview model IDs to current stable ones */
@@ -1010,6 +1352,23 @@ function getDefaultModel(provider: string): string {
     together: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
   };
   return defaults[provider] || "claude-sonnet-4-6";
+}
+
+/** Providers that can reach Claude Opus for Pro Max mode */
+const PRO_MAX_PROVIDERS: Record<string, string> = {
+  anthropic: "claude-opus-4-6",
+  openrouter: "anthropic/claude-opus-4-6",
+};
+
+/** Validate that the user's provider supports Pro Max. Returns error string or null. */
+function validateProMaxProvider(provider: string): string | null {
+  if (PRO_MAX_PROVIDERS[provider]) return null;
+  return "Modo Pro Max requer provedor Anthropic ou OpenRouter (que acessa Claude Opus). Configure em Configurações.";
+}
+
+/** Get the correct Claude Opus model ID for the user's provider */
+function getProMaxModel(provider: string): string {
+  return PRO_MAX_PROVIDERS[provider] || "claude-opus-4-6";
 }
 
 /** Pick the cheapest/fastest model for the user's provider (suggestion only) */

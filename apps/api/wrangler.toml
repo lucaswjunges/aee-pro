@@ -25,5 +25,7 @@ bucket_name = "aee-pro-documents"
 #   wrangler secret put LATEX_COMPILER_TOKEN
 #   wrangler secret put RESEND_API_KEY
 #   wrangler secret put FRONTEND_URL
+#   wrangler secret put AGENT_SERVICE_URL      # https://aee-pro-agent.fly.dev (Pro Max)
+#   wrangler secret put AGENT_SERVICE_TOKEN    # Bearer token for agent service auth
 # [vars]
 # SESSION_SECRET is set via `wrangler secret put` (never in this file)

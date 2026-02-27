@@ -247,6 +247,20 @@ promptRoutes.post("/seed", async (c) => {
         createdAt: now,
         updatedAt: now,
       });
+    } else if (existing.isBuiltIn) {
+      // Update built-in prompts to reflect template improvements
+      await db
+        .update(prompts)
+        .set({
+          name: prompt.name,
+          description: prompt.description,
+          category: prompt.category,
+          sortOrder: prompt.sortOrder,
+          requiredFields: prompt.requiredFields,
+          promptTemplate: prompt.promptTemplate,
+          updatedAt: now,
+        })
+        .where(eq(prompts.id, existing.id));
     }
   }
 
