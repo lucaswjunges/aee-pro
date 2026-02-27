@@ -556,102 +556,145 @@ export function getDocumentTypeConfig(slug: string): DocumentTypeConfig | undefi
 // ---------------------------------------------------------------------------
 
 export const PRO_MAX_ENHANCEMENTS: Record<string, string> = {
-  "anamnese": `MODO PRO MAX — ANAMNESE DE QUALIDADE PUBLICÁVEL:
-Produza um documento de 10-15 páginas com visual de livro profissional.
+  "anamnese": `MODO PRO MAX — ANAMNESE
+Meta: 10-15 páginas, qualidade publicável. Após compilar, chame assess_quality. Target: score ≥ 80.
 
-SEÇÕES OBRIGATÓRIAS (15 seções, nesta ordem):
-1. CAPA TikZ elaborada: retângulo aeeblue cobrindo topo da página, título \\Huge em branco, subtítulo aeegold, card branco centralizado com drop shadow contendo dados (aluno, escola, professor AEE, data), fileira de ícones TikZ no rodapé da capa.
-2. \\tableofcontents + \\newpage
-3. IDENTIFICAÇÃO: datacard completo com TODOS os campos do aluno. Use tabularx com \\rowcolor alternado.
-4. HISTÓRICO GESTACIONAL E DE NASCIMENTO: gestação, intercorrências, parto, condições de nascimento, APGAR, peso, permanência hospitalar. Use infobox.
-5. DESENVOLVIMENTO NEUROPSICOMOTOR: marcos motores, linguagem, controle esfincteriano, alimentação. Tabela com idade esperada vs idade alcançada com \\rowcolor.
-6. HISTÓRICO DE SAÚDE: diagnósticos, CID, medicações atuais e passadas, alergias, internações, cirurgias. Use alertbox para diagnósticos.
-7. DIAGRAMA RADAR TikZ: gráfico radar/aranha com 6 dimensões (Cognitivo, Motor, Linguagem, Social, Autonomia, Acadêmico), cada eixo de 0-5, área preenchida com opacidade. Use draw e fill com coordenadas polares.
-8. PERFIL DE DESENVOLVIMENTO: análise detalhada de cada dimensão (cognitivo, motor, linguagem, social, emocional, autonomia). Cada dimensão em subsection com texto rico + successbox ou alertbox conforme nível.
-9. CONTEXTO FAMILIAR E SOCIOECONÔMICO: composição familiar, dinâmica, participação, renda, moradia. Use datacard.
-10. HISTÓRICO ESCOLAR: escolas anteriores, retenções, adaptações, AEE anterior, relação com escola. Tabela cronológica com \\rowcolor.
-11. HABILIDADES ACADÊMICAS: leitura (nível), escrita (nível), matemática (nível), outras áreas. Tabela detalhada + infobox com potencialidades.
-12. COMPORTAMENTO E SOCIALIZAÇÃO: interação com pares, adultos, comportamento em sala, recreio, regulação emocional. Use dicabox com estratégias.
-13. TERAPIAS E ACOMPANHAMENTOS: terapias atuais (tipo, frequência, profissional), evolução percebida. Tabela com \\rowcolor.
-14. EXPECTATIVAS DA FAMÍLIA: o que esperam do AEE, preocupações, sonhos. Use successbox.
-15. CONSIDERAÇÕES FINAIS E ENCAMINHAMENTOS: síntese, próximos passos, assinaturas no formato tabular padrão.
+EXEMPLAR de seção excelente (use este nível em TODAS as seções):
 
-QUALIDADE VISUAL: Cada seção deve ter pelo menos 1 elemento visual (box, tabela, diagrama). Nunca mais de meia página sem elemento visual.`,
+\\section{\\faIcon{baby} Desenvolvimento Neuropsicomotor}
+O desenvolvimento motor de João seguiu marcos dentro do esperado para a faixa etária,
+com sustento cefálico aos 3 meses e marcha independente aos 13 meses.
+\\begin{infobox}[Marcos do Desenvolvimento]
+\\begin{tabularx}{\\linewidth}{lXX}
+\\rowcolor{aeelightblue} \\textbf{Marco} & \\textbf{Esperado} & \\textbf{Alcançado} \\\\
+Sustento cefálico & 3 meses & 3 meses \\\\
+\\rowcolor{aeelightblue} Sentou sem apoio & 6 meses & 7 meses \\\\
+Primeiras palavras & 12 meses & 24 meses \\\\
+\\rowcolor{aeelightblue} Controle esfincteriano & 24-36 meses & 42 meses \\\\
+\\end{tabularx}
+\\end{infobox}
+A linguagem apresentou atraso significativo, com primeiras palavras aos 24 meses
+e frases curtas apenas aos 3 anos e meio, o que motivou a busca por avaliação.
+\\begin{alertbox}[Sinais Precoces Identificados]
+\\begin{itemize}
+\\item Contato visual reduzido desde os 8 meses
+\\item Ausência de apontar protodeclarativo aos 14 meses
+\\item Ecolalia funcional persistente até os 4 anos
+\\end{itemize}
+\\end{alertbox}
 
-  "estudo-de-caso": `MODO PRO MAX — ESTUDO DE CASO DE QUALIDADE PUBLICÁVEL:
-Produza um documento de 10-15 páginas com visual de livro profissional.
+ESTRUTURA: Capa TikZ + sumário + 12-15 seções cobrindo identificação, gestação, desenvolvimento,
+saúde, diagnóstico, perfil por dimensão (com diagrama radar TikZ), contexto familiar, histórico
+escolar, habilidades acadêmicas, comportamento, terapias, expectativas da família, considerações finais.
+Cada seção COM elemento visual (box, tabela ou diagrama). Mínimo 2 diagramas TikZ.`,
 
-ELEMENTOS OBRIGATÓRIOS:
-1. CAPA TikZ elaborada (mesmo padrão da anamnese)
-2. \\tableofcontents + \\newpage
-3. Dados de identificação em datacard completo
-4. Diagnóstico e saúde em alertbox detalhado
-5. TIMELINE TikZ: linha do tempo horizontal com marcos do desenvolvimento do aluno (nascimento → diagnóstico → início escolar → início AEE → momento atual). Cada marco como node com data, cor distinta por tipo de evento.
-6. MIND MAP TikZ: diagrama de mapa mental com aluno no centro, 6 ramos (Cognitivo, Motor, Linguagem, Social, Autonomia, Acadêmico), cada ramo com 2-3 sub-nós com informações específicas. Use cores distintas por ramo.
-7. Análise detalhada por dimensão: cada uma com \\subsection, texto rico, successbox para pontos fortes, alertbox para dificuldades.
-8. DIAGRAMA de Barreiras vs Potencialidades: TikZ com duas colunas (vermelho/verde), itens como nodes com setas.
-9. Estratégias de intervenção em tabela detalhada com \\rowcolor alternado.
-10. Cronograma de acompanhamento em tabela (bimestre, objetivo, ação, responsável).
-11. Orientações à família em successbox.
-12. Orientações à equipe escolar em infobox.
-13. Assinaturas no formato tabular padrão.
+  "estudo-de-caso": `MODO PRO MAX — ESTUDO DE CASO
+Meta: 10-15 páginas, qualidade publicável. Após compilar, chame assess_quality. Target: score ≥ 80.
 
-QUALIDADE VISUAL: Mínimo 2 diagramas TikZ (timeline + mind map). Nunca mais de meia página sem elemento visual.`,
+EXEMPLAR de seção excelente:
 
-  "pdi": `MODO PRO MAX — PDI DE QUALIDADE PUBLICÁVEL:
-Produza um documento de 8-12 páginas com visual de livro profissional.
+\\section{\\faIcon{project-diagram} Análise do Desenvolvimento}
+\\subsection{\\faIcon{brain} Dimensão Cognitiva}
+Maria demonstra atenção sustentada de aproximadamente 15 minutos em atividades de interesse,
+com necessidade de apoio visual para manter o foco em tarefas dirigidas.
+\\begin{successbox}[Potencialidades Cognitivas]
+\\begin{itemize}
+\\item Memória visual acima do esperado — reconhece sequências de até 6 elementos
+\\item Interesse por classificação e organização de objetos por cor e forma
+\\item Responde bem a rotinas previsíveis com apoio de agenda visual
+\\end{itemize}
+\\end{successbox}
+A resolução de problemas concretos está em desenvolvimento, com necessidade de mediação
+para transferir aprendizagens entre contextos distintos.
+\\begin{alertbox}[Pontos de Atenção]
+Dificuldade com instruções verbais sequenciais (mais de 2 passos) —
+fragmentar comandos e associar a apoio visual.
+\\end{alertbox}
 
-ELEMENTOS OBRIGATÓRIOS:
-1. CAPA TikZ elaborada
-2. \\tableofcontents + \\newpage
-3. Dados de identificação em datacard completo
-4. Perfil funcional detalhado com alertbox para dificuldades e successbox para potencialidades
-5. TABELA DE METAS SMART: Para cada dimensão (Cognitivo, Linguagem, Motor, Social, Autonomia, Acadêmico), tabularx com colunas: Meta Específica | Indicador Mensurável | Estratégia | Recurso | Prazo | Status. Use \\rowcolor alternado, cabeçalho com cellcolor{aeeblue} e texto branco.
-6. CRONOGRAMA TikZ: diagrama Gantt simplificado com meses no eixo X e metas no eixo Y, barras coloridas por dimensão.
-7. Seção de adaptações curriculares com tabela por disciplina.
-8. Articulação AEE ↔ Sala regular em infobox.
-9. Indicadores de progresso: tabela de avaliação periódica (bimestral) com escala visual.
-10. DIAGRAMA TikZ de conexões: como avanço em uma dimensão impacta as outras (nodes conectados por setas com labels).
-11. Orientações para família em dicabox.
-12. Assinaturas no formato tabular padrão.
+DIAGRAMAS OBRIGATÓRIOS: 1) Timeline TikZ (nascimento→diagnóstico→escola→AEE→hoje),
+2) Mind map TikZ (aluno no centro, 6 dimensões com sub-nós específicos).
+ESTRUTURA: Capa TikZ + sumário + identificação + diagnóstico + timeline + análise por dimensão
+(cada uma com successbox/alertbox) + barreiras vs potencialidades + estratégias + cronograma + orientações.`,
 
-As metas devem ser genuinamente SMART: específicas ao diagnóstico do aluno, com indicadores numéricos/observáveis, prazos realistas.`,
+  "pdi": `MODO PRO MAX — PDI
+Meta: 8-12 páginas, qualidade publicável. Após compilar, chame assess_quality. Target: score ≥ 80.
 
-  "sugestao-atendimento": `MODO PRO MAX — SUGESTÃO DE ATENDIMENTO DE QUALIDADE PUBLICÁVEL:
-Produza um documento de 12-18 páginas — o mais rico e visual possível.
+EXEMPLAR de tabela de metas SMART:
 
-AMPLIFICAÇÕES PRO MAX (além da estrutura base do template):
-- Cada atividade deve ter MÍNIMO 8 passos no passo-a-passo (não 3-4 genéricos)
-- Inclua VARIAÇÕES de dificuldade para cada atividade (nível 1: com apoio total, nível 2: com apoio parcial, nível 3: independente)
-- Adicione ao menos 3 diagramas TikZ:
-  1. Mind map de objetivos (central: aluno, ramos: áreas, folhas: objetivos específicos)
-  2. Fluxograma de sessão (Acolhida→Atividade→Complementar→Fechamento) com tempos
-  3. Diagrama de progressão de habilidades (Fase 1→2→3→4→5 com critérios)
-- Planejamento semanal: 4 semanas COMPLETAS com atividades específicas (não genéricas)
-- Banco de atividades: MÍNIMO 12 atividades totais (4 leitura, 3 escrita, 3 socialização, 2 autonomia)
-- Cada atividadebox deve mencionar materiais REAIS e acessíveis (não "materiais diversos")
-- Ficha de registro em TikZ com design de formulário profissional
-- Tabela de recursos gratuitos com pelo menos 8 recursos REAIS (apps e sites que existem)
+\\section{\\faIcon{bullseye} Metas por Dimensão}
+\\subsection{Linguagem e Comunicação}
+\\begin{tealbox}[Metas SMART — Linguagem]
+\\begin{tabularx}{\\linewidth}{p{3.5cm}Xp{2cm}p{1.5cm}}
+\\rowcolor{aeelightblue} \\textbf{Meta} & \\textbf{Indicador} & \\textbf{Estratégia} & \\textbf{Prazo} \\\\
+Ampliar vocabulário funcional para 50 palavras & Registro semanal de palavras novas usadas espontaneamente & Pranchas de CAA + rotina de nomeação & Mar/2026 \\\\
+\\rowcolor{aeelightblue} Formar frases de 3 palavras & 80\\% das tentativas em 3 sessões consecutivas & Modelagem + espera estruturada & Jun/2026 \\\\
+\\end{tabularx}
+\\end{tealbox}
 
-QUALIDADE VISUAL: Este documento deve parecer um guia profissional publicado, não um relatório escolar.`,
+As metas devem ser genuinamente SMART: específicas ao diagnóstico, com indicadores numéricos/observáveis.
+DIAGRAMAS: 1) Cronograma TikZ tipo Gantt, 2) Diagrama de conexões entre dimensões.
+ESTRUTURA: Capa + sumário + identificação + perfil funcional + metas SMART por dimensão (6 tabelas)
++ cronograma + adaptações curriculares + articulação AEE↔sala regular + indicadores de progresso.`,
 
-  "parecer-descritivo": `MODO PRO MAX — PARECER DESCRITIVO DE QUALIDADE PUBLICÁVEL:
-Produza um documento de 8-12 páginas com visual de livro profissional.
+  "sugestao-atendimento": `MODO PRO MAX — SUGESTÃO DE ATENDIMENTO
+Meta: 12-18 páginas, guia profissional publicável. Após compilar, chame assess_quality. Target: score ≥ 80.
 
-ELEMENTOS OBRIGATÓRIOS:
-1. CAPA TikZ elaborada
-2. \\tableofcontents + \\newpage
-3. Dados de identificação em datacard completo
-4. Diagnóstico e contexto em alertbox
-5. TABELA DE AVALIAÇÃO por dimensão: tabularx com colunas Dimensão | Nível (1-5) | Descrição | Evidências. Use \\rowcolor alternado, ícones (\\cmark, \\starmark) para destaque.
-6. DIAGRAMA RADAR TikZ: mesmo padrão da anamnese, 6 dimensões, área preenchida. Se possível, duas áreas sobrepostas (semestre anterior vs atual) com cores diferentes e legenda.
-7. Desenvolvimento detalhado por dimensão: cada uma com \\subsection, texto analítico, successbox para avanços, alertbox para dificuldades.
-8. Desempenho acadêmico: tabela detalhada por componente (Leitura, Escrita, Interpretação, Matemática — operações, problemas, geometria).
-9. COMPARATIVO SEMESTRAL: tabela lado a lado (1º sem vs 2º sem) com setas de tendência (↑ ↓ →) por dimensão.
-10. Participação no AEE: frequência, engajamento, atividades mais eficazes.
-11. Estratégias utilizadas e efetividade em tabela com \\rowcolor.
-12. Recomendações organizadas por destinatário (AEE, sala regular, família).
-13. Assinaturas no formato tabular padrão.
+EXEMPLAR de atividade excelente:
 
-O parecer deve ser ANALÍTICO e BASEADO EM EVIDÊNCIAS, não genérico. Cite comportamentos específicos observados.`,
+\\begin{atividadebox}[aeegreen][\\faIcon{book-open} Leitura Compartilhada Adaptada]
+\\objtag[aeeblue]{Linguagem receptiva} \\objtag[aeegreen]{Vocabulário} \\objtag[aeepurple]{Atenção compartilhada}
+
+Leitura mediada com livro de imagens grandes e texto simplificado, focando em nomeação,
+antecipação de eventos e turnos comunicativos.
+
+\\textbf{Materiais:} Livro "O Gato Xadrez" (Bia Villela), pranchas de CAA com símbolos
+do livro, dado de perguntas (quem/onde/o quê), timer visual de 15 min.
+
+\\textbf{Passo a passo:}
+\\begin{enumerate}
+\\item Apresentar a capa e pedir que o aluno nomeie o que vê (apoio: prancha CAA)
+\\item Ler a primeira página com entonação exagerada, apontando as imagens
+\\item Pausar e fazer pergunta do dado: "Quem apareceu?" — esperar 10s
+\\item Se não responder, oferecer 2 opções visuais (prancha) para escolha
+\\item Continuar a leitura, pedindo que o aluno vire a página (autonomia motora)
+\\item A cada 3 páginas, recontar o que aconteceu usando 3 imagens sequenciais
+\\item No final, pedir que escolha a parte favorita apontando no livro
+\\item Registrar: palavras usadas, nível de apoio, tempo de atenção
+\\end{enumerate}
+
+\\textbf{Variações:} \\textit{Nível 1:} apoio total com modelagem; \\textit{Nível 2:} apoio parcial
+(dicas visuais); \\textit{Nível 3:} recontar independente com apoio de imagens.
+\\end{atividadebox}
+
+Use este nível de detalhe em TODAS as atividades. Mínimo 12 atividades (4 leitura, 3 escrita,
+3 socialização, 2 autonomia). Materiais REAIS. 4 semanas de planejamento específico.
+DIAGRAMAS: Mind map de objetivos + fluxograma de sessão + diagrama de progressão.`,
+
+  "parecer-descritivo": `MODO PRO MAX — PARECER DESCRITIVO
+Meta: 8-12 páginas, qualidade publicável. Após compilar, chame assess_quality. Target: score ≥ 80.
+
+EXEMPLAR de análise por dimensão:
+
+\\subsection{\\faIcon{comments} Linguagem e Comunicação}
+No início do semestre, Pedro utilizava predominantemente gestos e vocalizações
+para se comunicar, com vocabulário expressivo de aproximadamente 15 palavras.
+\\begin{successbox}[Avanços no Semestre]
+\\begin{itemize}
+\\item Vocabulário ampliou de 15 para 38 palavras funcionais
+\\item Iniciou uso espontâneo de frases de 2 palavras ("quero água", "dá bola")
+\\item Passou a responder ao próprio nome em 8 de 10 chamadas (antes: 3/10)
+\\end{itemize}
+\\end{successbox}
+A pragmática permanece como área prioritária — Pedro ainda apresenta dificuldade
+em iniciar interações com pares sem mediação do adulto.
+\\begin{alertbox}[Aspectos em Desenvolvimento]
+Turnos conversacionais limitados a 2 trocas. Manter estratégia de espera
+estruturada (10s) e uso de scripts visuais para situações sociais.
+\\end{alertbox}
+
+O parecer deve ser ANALÍTICO e baseado em EVIDÊNCIAS com dados concretos (números, datas,
+frequências). DIAGRAMA RADAR TikZ com 6 dimensões (ideal: 2 áreas sobrepostas — semestre
+anterior vs atual). Tabela comparativa com setas de tendência (↑ ↓ →).
+ESTRUTURA: Capa + sumário + identificação + diagnóstico + avaliação por dimensão (tabela +
+radar) + desempenho acadêmico + comparativo + participação no AEE + estratégias + recomendações.`,
 };

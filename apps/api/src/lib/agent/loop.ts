@@ -133,7 +133,9 @@ export async function* runAgentLoop(
     : defaultMax;
 
   let hallucinationCorrected = false;
-  let proMaxRefinementDone = false; // Track whether auto-refinement has been injected
+  let qualityAssessmentCount = 0; // Track convergence iterations
+  const MAX_QUALITY_ASSESSMENTS = isProMax ? 3 : 1; // Pro Max: up to 3 refinement cycles
+  const QUALITY_TARGET = isProMax ? 80 : 60;
 
   for (let iteration = 0; iteration < maxIter; iteration++) {
     // Yield between iterations so the event loop can serve other requests
@@ -379,31 +381,20 @@ export async function* runAgentLoop(
     // Yield after tool execution before next iteration
     await yieldEventLoop();
 
-    // Pro Max auto-refinement: after first successful compile_latex, inject review prompt
-    if (isProMax && !proMaxRefinementDone) {
+    // Quality convergence loop: after successful compile, inject assess_quality instruction
+    if (qualityAssessmentCount < MAX_QUALITY_ASSESSMENTS) {
       const hasSuccessfulCompile = toolUseBlocks.some((b) => b.name === "compile_latex") &&
         toolResults.some((tr) => tr.tool_use_id && !tr.is_error && (tr.content as string)?.includes("Compilação bem-sucedida"));
       if (hasSuccessfulCompile) {
-        proMaxRefinementDone = true;
-        // Merge tool results + refinement prompt in a SINGLE user message
-        // (two consecutive user messages break Anthropic API alternation rule)
+        qualityAssessmentCount++;
         const texFile = toolUseBlocks.find((b) => b.name === "compile_latex")?.input?.path as string || "main.tex";
         const refinementPrompt: ClaudeContentBlock = {
           type: "text",
-          text: `REVISÃO PRO MAX: O PDF foi compilado, mas ainda pode melhorar. Leia ${texFile} com read_file e avalie criticamente:
-1. Tem capa TikZ elaborada (retângulo colorido + card com shadow)? Se não, adicione.
-2. Tem \\tableofcontents? Se não, adicione após a capa.
-3. Tem pelo menos 2 diagramas TikZ (radar, mind map, timeline, fluxograma)? Se não, adicione os mais relevantes.
-4. Todas as tabelas têm \\rowcolor alternado? Se não, corrija.
-5. Há trechos com mais de meia página sem elemento visual? Se sim, adicione boxes ou diagramas.
-6. O documento tem pelo menos 8 páginas? Se não, aprofunde as seções mais fracas.
-7. As análises são específicas ao diagnóstico do aluno ou genéricas? Se genéricas, reescreva com especificidade.
-8. Usa variedade de boxes (infobox, alertbox, successbox, warnbox, tealbox, purplebox, goldbox, datacard)? Se não, diversifique.
-
-Corrija o que for necessário com edit_file (edições pontuais, NÃO reescreva o arquivo inteiro) e recompile com compile_latex.`,
+          text: `Chame assess_quality("${texFile}") para avaliar a qualidade do documento. Se o score for < ${QUALITY_TARGET}, corrija os itens listados em PRIORITY FIXES usando edit_file (edições pontuais, NÃO reescreva tudo) e recompile. Se score >= ${QUALITY_TARGET}, o documento está pronto — informe o resultado à professora.
+(Avaliação ${qualityAssessmentCount}/${MAX_QUALITY_ASSESSMENTS})`,
         };
         messages.push({ role: "user", content: [...toolResults, refinementPrompt] });
-        yield { type: "text", content: "\n\n*Revisando qualidade Pro Max...*\n" };
+        yield { type: "text", content: `\n\n*Avaliação de qualidade (${qualityAssessmentCount}/${MAX_QUALITY_ASSESSMENTS})...*\n` };
         continue;
       }
     }

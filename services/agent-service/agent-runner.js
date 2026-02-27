@@ -10,54 +10,6 @@ import {
 import { createAEEMcpServer } from "./mcp-tools.js";
 
 /**
- * Adapt tool names from the Worker's custom agent loop to the Claude Agent SDK.
- * The system prompt references write_file, read_file, edit_file, etc. but the
- * SDK has Write, Read, Edit, Bash, Glob, Grep + MCP tools (compile_latex, etc.).
- */
-function adaptToolNames(prompt) {
-  const SDK_TOOL_GUIDE = `
-
---- FERRAMENTAS DISPONÍVEIS (Agent SDK) ---
-ATENÇÃO: Você está rodando no Claude Agent SDK. As ferramentas disponíveis são:
-
-FERRAMENTAS BUILT-IN (use diretamente):
-- Write — cria/sobrescreve arquivo (parâmetro: file_path, content)
-- Edit — edita arquivo existente (parâmetro: file_path, old_string, new_string)
-- Read — lê arquivo (parâmetro: file_path)
-- Bash — executa comando shell (parâmetro: command)
-- Glob — busca arquivos por padrão (parâmetro: pattern)
-- Grep — busca conteúdo em arquivos (parâmetro: pattern)
-
-FERRAMENTAS MCP (prefixo mcp__aee-tools__):
-- mcp__aee-tools__compile_latex — compila .tex para PDF (parâmetro: path — relativo ao workspace)
-- mcp__aee-tools__get_student_data — retorna dados do aluno (sem parâmetros)
-- mcp__aee-tools__get_prompt_template — retorna template de documento (parâmetro: slug)
-
-MAPEAMENTO DAS REFERÊNCIAS DO PROMPT:
-- "write_file" → use Write
-- "read_file" → use Read
-- "edit_file" → use Edit
-- "list_files" → use Glob com pattern "**/*"
-- "delete_file" → use Bash com "rm <path>"
-- "rename_file" → use Bash com "mv <old> <new>"
-- "search_files" → use Grep
-- "compile_latex" → use mcp__aee-tools__compile_latex
-- "get_student_data" → use mcp__aee-tools__get_student_data
-- "get_prompt_template" → use mcp__aee-tools__get_prompt_template
-- "spawn_agent" → use Task (built-in do SDK)
-
-FLUXO PARA CRIAR DOCUMENTO .tex:
-1. mcp__aee-tools__get_student_data (dados do aluno)
-2. mcp__aee-tools__get_prompt_template (template do documento)
-3. Write (criar arquivo .tex)
-4. mcp__aee-tools__compile_latex (compilar para PDF)
-5. Se erro: Edit (corrigir) → mcp__aee-tools__compile_latex (recompilar)
---- FIM DAS FERRAMENTAS ---
-`;
-  return SDK_TOOL_GUIDE + "\n\n" + prompt;
-}
-
-/**
  * Run the Claude Agent SDK for a Pro Max request.
  *
  * Flow:
@@ -85,6 +37,7 @@ export async function runAgent(opts) {
     messages,
     studentData,
     promptTemplates,
+    proMaxEnhancements,
     projectId,
     maxTurns,
     maxThinkingTokens,
@@ -107,7 +60,7 @@ export async function runAgent(opts) {
     workDir,
     studentData,
     promptTemplates,
-    proMaxEnhancements: {}, // Could be passed from Worker if needed
+    proMaxEnhancements: proMaxEnhancements || {},
   });
 
   // 3. Build the prompt from messages

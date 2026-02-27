@@ -693,6 +693,7 @@ function getToolIcon(tool: string) {
     compile_latex: Cpu,
     get_student_data: Database,
     get_prompt_template: BookOpen,
+    assess_quality: CheckCircle2,
   };
   return icons[tool] || Wrench;
 }
@@ -709,6 +710,7 @@ function toolDisplayName(tool: string): string {
     compile_latex: "Compilando LaTeX",
     get_student_data: "Buscando dados do aluno",
     get_prompt_template: "Carregando template",
+    assess_quality: "Avaliando qualidade",
     spawn_agent: "Iniciando sub-agente",
   };
   return names[tool] || tool || "Executando";
@@ -732,6 +734,8 @@ function getToolDetail(tool: string, input?: Record<string, unknown>): string {
       return input.slug ? String(input.slug) : "";
     case "get_student_data":
       return input.name ? String(input.name) : input.student_id ? String(input.student_id).slice(0, 8) + "..." : "";
+    case "assess_quality":
+      return input.path ? String(input.path) : "";
     case "spawn_agent":
       return input.task ? String(input.task).slice(0, 50) : "";
     default:

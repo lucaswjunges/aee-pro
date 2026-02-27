@@ -123,6 +123,18 @@ export const WORKSPACE_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "assess_quality",
+    description:
+      "Avalia qualidade de um documento .tex: score 0-100, elementos visuais, estrutura, desertos de texto, fixes prioritários. Use APÓS compilar com sucesso.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Arquivo .tex para avaliar" },
+      },
+      required: ["path"],
+    },
+  },
+  {
     name: "spawn_agent",
     description: "Dispara sub-agente para tarefa paralela. Tem acesso aos mesmos tools (exceto spawn_agent).",
     input_schema: {

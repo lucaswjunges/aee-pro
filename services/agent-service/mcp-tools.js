@@ -1,6 +1,9 @@
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import fs from "node:fs";
+import path from "node:path";
 import { compileLatexLocal } from "./latex-utils.js";
+import { analyzeLatexStructure, formatQualityReport } from "./quality-analyzer.js";
 
 /**
  * Create an MCP server with AEE-specific tools.
@@ -91,9 +94,39 @@ export function createAEEMcpServer(ctx) {
     }
   );
 
+  const assessQualityTool = tool(
+    "assess_quality",
+    "Avalia qualidade de um documento .tex: score 0-100, elementos visuais, estrutura, desertos de texto, fixes prioritários. Use APÓS compilar com sucesso.",
+    {
+      path: z.string().describe("Caminho relativo do arquivo .tex (ex: anamnese.tex)"),
+    },
+    async (args) => {
+      try {
+        const absPath = path.join(ctx.workDir, args.path);
+        if (!fs.existsSync(absPath)) {
+          return {
+            content: [{ type: "text", text: `Arquivo não encontrado: ${args.path}` }],
+            isError: true,
+          };
+        }
+        const content = fs.readFileSync(absPath, "utf-8");
+        const metrics = analyzeLatexStructure(content);
+        const report = formatQualityReport(metrics, "promax");
+        return {
+          content: [{ type: "text", text: report }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Erro ao avaliar qualidade: ${err.message}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
   return createSdkMcpServer({
     name: "aee-pro-tools",
     version: "1.0.0",
-    tools: [compileLatexTool, getStudentDataTool, getPromptTemplateTool],
+    tools: [compileLatexTool, getStudentDataTool, getPromptTemplateTool, assessQualityTool],
   });
 }

@@ -11,6 +11,7 @@ import { sanitizeLatexSource } from "../latex/sanitizer";
 import { injectProfessionalPreamble } from "../latex/preamble";
 import { validateAndFixLatex } from "../latex/validator";
 import { PRO_MAX_ENHANCEMENTS } from "../latex/document-types";
+import { analyzeLatexStructure, formatQualityReport } from "../latex/quality-analyzer";
 import { saveVersion } from "../../routes/workspace-drive";
 
 /** Yield control to the event loop so other requests can be processed */
@@ -92,6 +93,8 @@ export async function executeTool(
         return await getStudentData(ctx, input.name as string | undefined);
       case "get_prompt_template":
         return await getPromptTemplate(requireParam("slug"), ctx);
+      case "assess_quality":
+        return await assessQuality(requireParam("path"), ctx);
       default:
         return { success: false, error: `Tool desconhecida: ${toolName}` };
     }
@@ -951,6 +954,45 @@ async function getPromptTemplate(
   return {
     success: true,
     output,
+  };
+}
+
+async function assessQuality(
+  filePath: string,
+  ctx: ToolExecContext
+): Promise<ToolExecResult> {
+  // Read the .tex file from R2
+  const file = await ctx.db
+    .select()
+    .from(workspaceFiles)
+    .where(
+      and(
+        eq(workspaceFiles.projectId, ctx.projectId),
+        eq(workspaceFiles.path, filePath)
+      )
+    )
+    .get();
+
+  if (!file) {
+    return { success: false, error: `Arquivo não encontrado: ${filePath}` };
+  }
+
+  if (!filePath.endsWith(".tex")) {
+    return { success: false, error: `assess_quality só funciona com arquivos .tex` };
+  }
+
+  const r2Object = await ctx.r2.get(`projects/${ctx.projectId}/${filePath}`);
+  if (!r2Object) {
+    return { success: false, error: `Conteúdo não encontrado no R2: ${filePath}` };
+  }
+
+  const content = await r2Object.text();
+  const metrics = analyzeLatexStructure(content);
+  const report = formatQualityReport(metrics, ctx.qualityMode || "standard");
+
+  return {
+    success: true,
+    output: report,
   };
 }
 

@@ -16,7 +16,8 @@ import { runAgentLoop } from "../lib/agent/loop";
 import type { ToolExecContext } from "../lib/agent/tool-executor";
 import { createAIProvider } from "../lib/ai";
 import type { AIMessage } from "../lib/ai";
-import { buildSystemPrompt } from "../lib/agent/system-prompt";
+import { buildSystemPrompt, buildAgentSDKSystemPrompt } from "../lib/agent/system-prompt";
+import { PRO_MAX_ENHANCEMENTS } from "../lib/latex/document-types";
 import { packProjectFiles, syncFilesBack } from "../lib/agent/file-packager";
 import type { PackedFile } from "../lib/agent/file-packager";
 import type { Env } from "../index";
@@ -141,29 +142,9 @@ workspaceChatRoutes.post("/projects/:id/chat", async (c) => {
     .orderBy(workspaceMessages.createdAt)
     .limit(40);
 
-  // Smart history windowing: if >15 messages, summarize older ones
-  // and keep the last 10 in full detail for context
-  const KEEP_RECENT = 10;
-  let conversationSummary: string | undefined;
-  let messagesToConvert = history;
-
-  if (history.length > KEEP_RECENT) {
-    const olderMessages = history.slice(0, history.length - KEEP_RECENT);
-    const recentMessages = history.slice(history.length - KEEP_RECENT);
-
-    // Build compact summary of older messages
-    const summaryParts: string[] = [];
-    for (const msg of olderMessages) {
-      if (msg.role === "user") {
-        summaryParts.push(`Professora: ${msg.content.slice(0, 150)}${msg.content.length > 150 ? "…" : ""}`);
-      } else if (msg.role === "assistant") {
-        const brief = msg.content.slice(0, 100);
-        summaryParts.push(`Assistente: ${brief}${msg.content.length > 100 ? "…" : ""}${msg.toolCalls ? " (+ tools)" : ""}`);
-      }
-    }
-    conversationSummary = summaryParts.join("\n");
-    messagesToConvert = recentMessages;
-  }
+  // Smart history windowing: keep recent messages in full, summarize older ones semantically
+  const KEEP_RECENT = qualityMode === "promax" ? 20 : 10;
+  const { conversationSummary, messagesToConvert } = buildSemanticHistory(history, KEEP_RECENT);
 
   // Build messages array for the AI.
   // Historical assistant messages with tool calls are stored as SSE events
@@ -493,26 +474,8 @@ workspaceChatRoutes.post("/projects/:id/messages/:messageId/regenerate", async (
     .limit(40);
 
   // Smart history windowing (same as POST /chat)
-  const KEEP_RECENT = 10;
-  let conversationSummary: string | undefined;
-  let messagesToConvert = history;
-
-  if (history.length > KEEP_RECENT) {
-    const olderMessages = history.slice(0, history.length - KEEP_RECENT);
-    const recentMessages = history.slice(history.length - KEEP_RECENT);
-
-    const summaryParts: string[] = [];
-    for (const msg of olderMessages) {
-      if (msg.role === "user") {
-        summaryParts.push(`Professora: ${msg.content.slice(0, 150)}${msg.content.length > 150 ? "…" : ""}`);
-      } else if (msg.role === "assistant") {
-        const brief = msg.content.slice(0, 100);
-        summaryParts.push(`Assistente: ${brief}${msg.content.length > 100 ? "…" : ""}${msg.toolCalls ? " (+ tools)" : ""}`);
-      }
-    }
-    conversationSummary = summaryParts.join("\n");
-    messagesToConvert = recentMessages;
-  }
+  const KEEP_RECENT = regenQualityMode === "promax" ? 20 : 10;
+  const { conversationSummary, messagesToConvert } = buildSemanticHistory(history, KEEP_RECENT);
 
   // Build messages array for the AI (same logic as POST /chat)
   const claudeMessages = messagesToConvert
@@ -1154,8 +1117,8 @@ async function createProMaxAgentResponse(opts: {
         const packedFiles = await packProjectFiles(projectId, userId, db, c.env.R2);
         console.log(`[promax-proxy] Packed ${packedFiles.length} files`);
 
-        // 2. Build system prompt
-        const systemPrompt = buildSystemPrompt({
+        // 2. Build system prompt (Agent SDK version — native tool names)
+        const systemPrompt = buildAgentSDKSystemPrompt({
           projectName: project.name,
           projectDescription: project.description,
           studentName: studentInfo?.name || null,
@@ -1208,6 +1171,7 @@ async function createProMaxAgentResponse(opts: {
             messages: claudeMessages,
             studentData: studentDataText,
             promptTemplates,
+            proMaxEnhancements: PRO_MAX_ENHANCEMENTS,
             projectId,
             maxTurns: 35,
             maxThinkingTokens: 16000,
@@ -1325,6 +1289,144 @@ async function createProMaxAgentResponse(opts: {
       "Access-Control-Allow-Origin": "*",
     },
   });
+}
+
+// ---------- semantic history ----------
+
+/**
+ * Build semantic history summary from older messages.
+ * Instead of truncating text by character count, extracts metadata:
+ * - Files created/edited/compiled
+ * - Quality scores
+ * - Key actions performed
+ * This preserves WHAT was done (actionable context) over HOW it was said (text fragments).
+ */
+function buildSemanticHistory(
+  history: Array<{ role: string; content: string; toolCalls: string | null }>,
+  keepRecent: number
+): { conversationSummary: string | undefined; messagesToConvert: typeof history } {
+  if (history.length <= keepRecent) {
+    return { conversationSummary: undefined, messagesToConvert: history };
+  }
+
+  const olderMessages = history.slice(0, history.length - keepRecent);
+  const recentMessages = history.slice(history.length - keepRecent);
+
+  const summaryParts: string[] = [];
+  for (const msg of olderMessages) {
+    if (msg.role === "user") {
+      // Keep user requests concise but complete enough to understand intent
+      const text = msg.content.length > 120 ? msg.content.slice(0, 120) + "…" : msg.content;
+      summaryParts.push(`Professora: ${text}`);
+    } else if (msg.role === "assistant") {
+      // Extract semantic metadata from tool calls
+      const actions = extractSemanticActions(msg);
+      if (actions) {
+        summaryParts.push(`Assistente: ${actions}`);
+      } else {
+        // Fallback to brief text if no tool calls
+        const brief = msg.content.slice(0, 80);
+        summaryParts.push(`Assistente: ${brief}${msg.content.length > 80 ? "…" : ""}`);
+      }
+    }
+  }
+
+  return {
+    conversationSummary: summaryParts.join("\n"),
+    messagesToConvert: recentMessages,
+  };
+}
+
+/**
+ * Extract semantic actions from an assistant message's tool calls.
+ * Returns a compact summary like:
+ *   "Criou anamnese.tex | Compilou → output/anamnese.pdf (245KB) | Score: 82/100"
+ */
+function extractSemanticActions(msg: { content: string; toolCalls: string | null }): string | null {
+  if (!msg.toolCalls) return null;
+
+  try {
+    const events = JSON.parse(msg.toolCalls) as Array<{
+      type: string;
+      tool?: string;
+      toolInput?: Record<string, unknown>;
+      result?: unknown;
+      content?: string;
+    }>;
+
+    const actions: string[] = [];
+    const filesCreated = new Set<string>();
+    const filesEdited = new Set<string>();
+    let compiledPdf: string | null = null;
+    let qualityScore: string | null = null;
+
+    for (const ev of events) {
+      if (ev.type === "tool_call" && ev.tool) {
+        const input = ev.toolInput || {};
+        switch (ev.tool) {
+          case "write_file":
+            if (input.path) filesCreated.add(String(input.path));
+            break;
+          case "edit_file":
+            if (input.path) filesEdited.add(String(input.path));
+            break;
+          case "compile_latex":
+            if (input.path) compiledPdf = String(input.path).replace(/\.tex$/, ".pdf");
+            break;
+          case "get_prompt_template":
+            if (input.slug) actions.push(`Consultou template: ${input.slug}`);
+            break;
+          case "get_student_data":
+            actions.push("Consultou dados do aluno");
+            break;
+          case "assess_quality":
+            break; // Score captured from result
+          case "spawn_agent":
+            if (input.task) actions.push(`Sub-agente: ${String(input.task).slice(0, 60)}`);
+            break;
+        }
+      } else if (ev.type === "tool_result" && ev.tool === "assess_quality") {
+        // Extract score from result
+        const resultStr = typeof ev.result === "string" ? ev.result
+          : ev.result && typeof ev.result === "object" && "output" in (ev.result as Record<string, unknown>)
+            ? String((ev.result as Record<string, unknown>).output)
+            : "";
+        const scoreMatch = resultStr.match(/(\d+)\/100/);
+        if (scoreMatch) qualityScore = scoreMatch[1];
+      } else if (ev.type === "tool_result" && ev.tool === "compile_latex") {
+        const resultStr = typeof ev.result === "string" ? ev.result
+          : ev.result && typeof ev.result === "object" && "output" in (ev.result as Record<string, unknown>)
+            ? String((ev.result as Record<string, unknown>).output)
+            : "";
+        const sizeMatch = resultStr.match(/(\d+(?:\.\d+)?\s*(?:KB|MB))/i);
+        const pagesMatch = resultStr.match(/(\d+)\s*p[áa]ginas?/i);
+        if (compiledPdf && (sizeMatch || pagesMatch)) {
+          const details = [sizeMatch?.[1], pagesMatch ? `${pagesMatch[1]}p` : null].filter(Boolean).join(", ");
+          compiledPdf = `output/${compiledPdf.split("/").pop()} (${details})`;
+        }
+      }
+    }
+
+    // Build compact action summary
+    if (filesCreated.size > 0) actions.push(`Criou ${[...filesCreated].join(", ")}`);
+    if (filesEdited.size > 0) actions.push(`Editou ${[...filesEdited].join(", ")}`);
+    if (compiledPdf) actions.push(`Compilou → ${compiledPdf}`);
+    if (qualityScore) actions.push(`Score: ${qualityScore}/100`);
+
+    // Add brief text if there are no tool actions
+    if (actions.length === 0) return null;
+
+    // Prefix with brief text content if it exists
+    const textBrief = msg.content && msg.content !== "(tool calls only)"
+      ? msg.content.slice(0, 60).replace(/\n/g, " ") + (msg.content.length > 60 ? "…" : "")
+      : null;
+
+    return textBrief
+      ? `${textBrief} | ${actions.join(" | ")}`
+      : actions.join(" | ");
+  } catch {
+    return null;
+  }
 }
 
 // ---------- helpers ----------
