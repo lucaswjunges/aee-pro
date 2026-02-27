@@ -559,11 +559,12 @@ export const PRO_MAX_ENHANCEMENTS: Record<string, string> = {
   "anamnese": `MODO PRO MAX — ANAMNESE
 Meta: 10-15 páginas, qualidade publicável. Após compilar, chame assess_quality. Target: score ≥ 80.
 
+REGRA ANTI-DESERTO: nunca 20+ linhas de texto sem elemento visual (box, tabela, itemize).
+
 EXEMPLAR de seção excelente (use este nível em TODAS as seções):
 
 \\section{\\faIcon{baby} Desenvolvimento Neuropsicomotor}
-O desenvolvimento motor de João seguiu marcos dentro do esperado para a faixa etária,
-com sustento cefálico aos 3 meses e marcha independente aos 13 meses.
+O desenvolvimento motor seguiu marcos esperados, com marcha independente aos 13 meses.
 \\begin{infobox}[Marcos do Desenvolvimento]
 \\begin{tabularx}{\\linewidth}{lXX}
 \\rowcolor{aeelightblue} \\textbf{Marco} & \\textbf{Esperado} & \\textbf{Alcançado} \\\\
@@ -573,66 +574,69 @@ Primeiras palavras & 12 meses & 24 meses \\\\
 \\rowcolor{aeelightblue} Controle esfincteriano & 24-36 meses & 42 meses \\\\
 \\end{tabularx}
 \\end{infobox}
-A linguagem apresentou atraso significativo, com primeiras palavras aos 24 meses
-e frases curtas apenas aos 3 anos e meio, o que motivou a busca por avaliação.
+A linguagem apresentou atraso significativo, motivando a primeira avaliação.
 \\begin{alertbox}[Sinais Precoces Identificados]
 \\begin{itemize}
 \\item Contato visual reduzido desde os 8 meses
 \\item Ausência de apontar protodeclarativo aos 14 meses
-\\item Ecolalia funcional persistente até os 4 anos
 \\end{itemize}
 \\end{alertbox}
 
-ESTRUTURA: Capa TikZ + sumário + 12-15 seções cobrindo identificação, gestação, desenvolvimento,
-saúde, diagnóstico, perfil por dimensão (com diagrama radar TikZ), contexto familiar, histórico
-escolar, habilidades acadêmicas, comportamento, terapias, expectativas da família, considerações finais.
-Cada seção COM elemento visual (box, tabela ou diagrama). Mínimo 2 diagramas TikZ.`,
+DIAGRAMAS TikZ: use tikzpicture com nodes e setas (NÃO pgfplots/axis — causa erros).
+ESTRUTURA: Capa TikZ + sumário + 12-15 seções com gestação, desenvolvimento, saúde,
+diagnóstico, perfil por dimensão (radar TikZ), família, escolar, comportamento, terapias,
+expectativas, considerações. CADA seção com box ou tabela. Mínimo 2 diagramas TikZ.`,
 
   "estudo-de-caso": `MODO PRO MAX — ESTUDO DE CASO
 Meta: 10-15 páginas, qualidade publicável. Após compilar, chame assess_quality. Target: score ≥ 80.
 
-EXEMPLAR de seção excelente:
+REGRA ANTI-DESERTO: nunca escreva 20+ linhas de texto sem inserir um elemento visual
+(infobox, alertbox, successbox, tabela, ou itemize). Intercale texto com boxes a cada parágrafo.
 
-\\section{\\faIcon{project-diagram} Análise do Desenvolvimento}
+EXEMPLAR de análise por dimensão (use este padrão EXATO em cada dimensão):
+
 \\subsection{\\faIcon{brain} Dimensão Cognitiva}
-Maria demonstra atenção sustentada de aproximadamente 15 minutos em atividades de interesse,
-com necessidade de apoio visual para manter o foco em tarefas dirigidas.
+Pedro demonstra atenção sustentada de 15 min em atividades de interesse. [2-3 linhas de análise]
 \\begin{successbox}[Potencialidades Cognitivas]
 \\begin{itemize}
 \\item Memória visual acima do esperado — reconhece sequências de até 6 elementos
-\\item Interesse por classificação e organização de objetos por cor e forma
 \\item Responde bem a rotinas previsíveis com apoio de agenda visual
 \\end{itemize}
 \\end{successbox}
-A resolução de problemas concretos está em desenvolvimento, com necessidade de mediação
-para transferir aprendizagens entre contextos distintos.
+[1-2 linhas de transição narrativa]
 \\begin{alertbox}[Pontos de Atenção]
-Dificuldade com instruções verbais sequenciais (mais de 2 passos) —
-fragmentar comandos e associar a apoio visual.
+Dificuldade com instruções verbais sequenciais (mais de 2 passos).
 \\end{alertbox}
 
-DIAGRAMAS OBRIGATÓRIOS: 1) Timeline TikZ (nascimento→diagnóstico→escola→AEE→hoje),
-2) Mind map TikZ (aluno no centro, 6 dimensões com sub-nós específicos).
-ESTRUTURA: Capa TikZ + sumário + identificação + diagnóstico + timeline + análise por dimensão
-(cada uma com successbox/alertbox) + barreiras vs potencialidades + estratégias + cronograma + orientações.`,
+DIAGRAMAS: Use tikzpicture com nodes e setas (NÃO pgfplots/axis — causa erros de compilação).
+1) Timeline horizontal: nodes com datas importantes (nascimento, diagnóstico, AEE, hoje)
+2) Mind map central: node do aluno no centro, 6 nodes dimensionais ao redor com setas
+
+ESTRUTURA: Capa TikZ + sumário + identificação (datacard) + diagnóstico (alertbox) + timeline TikZ
++ CADA dimensão com o padrão acima (texto + successbox + alertbox) + barreiras vs potencialidades
+(tabela comparativa) + estratégias + cronograma + orientações (família/equipe).`,
 
   "pdi": `MODO PRO MAX — PDI
 Meta: 8-12 páginas, qualidade publicável. Após compilar, chame assess_quality. Target: score ≥ 80.
 
+REGRA ANTI-DESERTO: nunca 20+ linhas de texto sem elemento visual (box, tabela, itemize).
+
 EXEMPLAR de tabela de metas SMART:
 
-\\section{\\faIcon{bullseye} Metas por Dimensão}
-\\subsection{Linguagem e Comunicação}
+\\subsection{\\faIcon{comments} Linguagem e Comunicação}
 \\begin{tealbox}[Metas SMART — Linguagem]
 \\begin{tabularx}{\\linewidth}{p{3.5cm}Xp{2cm}p{1.5cm}}
 \\rowcolor{aeelightblue} \\textbf{Meta} & \\textbf{Indicador} & \\textbf{Estratégia} & \\textbf{Prazo} \\\\
-Ampliar vocabulário funcional para 50 palavras & Registro semanal de palavras novas usadas espontaneamente & Pranchas de CAA + rotina de nomeação & Mar/2026 \\\\
-\\rowcolor{aeelightblue} Formar frases de 3 palavras & 80\\% das tentativas em 3 sessões consecutivas & Modelagem + espera estruturada & Jun/2026 \\\\
+Ampliar vocabulário funcional para 50 palavras & Registro semanal & Pranchas de CAA & Mar/2026 \\\\
+\\rowcolor{aeelightblue} Formar frases de 3 palavras & 80\\% em 3 sessões & Modelagem & Jun/2026 \\\\
 \\end{tabularx}
 \\end{tealbox}
 
-As metas devem ser genuinamente SMART: específicas ao diagnóstico, com indicadores numéricos/observáveis.
-DIAGRAMAS: 1) Cronograma TikZ tipo Gantt, 2) Diagrama de conexões entre dimensões.
+Metas genuinamente SMART: específicas ao diagnóstico, com indicadores numéricos/observáveis.
+Use números reais baseados no perfil do aluno (não genéricos).
+DIAGRAMAS TikZ: use tikzpicture com nodes e setas (NÃO pgfplots/axis — causa erros).
+1) Cronograma tipo Gantt: nodes retangulares com cores por prioridade
+2) Diagrama de conexões: como avanço numa dimensão impacta outras
 ESTRUTURA: Capa + sumário + identificação + perfil funcional + metas SMART por dimensão (6 tabelas)
 + cronograma + adaptações curriculares + articulação AEE↔sala regular + indicadores de progresso.`,
 
@@ -668,33 +672,35 @@ do livro, dado de perguntas (quem/onde/o quê), timer visual de 15 min.
 
 Use este nível de detalhe em TODAS as atividades. Mínimo 12 atividades (4 leitura, 3 escrita,
 3 socialização, 2 autonomia). Materiais REAIS. 4 semanas de planejamento específico.
-DIAGRAMAS: Mind map de objetivos + fluxograma de sessão + diagrama de progressão.`,
+DIAGRAMAS TikZ: use tikzpicture com nodes e setas (NÃO pgfplots/axis — causa erros).
+1) Mind map de objetivos (aluno no centro, áreas ao redor)
+2) Fluxograma horizontal de sessão (Acolhida→Atividade→Complementar→Fechamento)`,
 
   "parecer-descritivo": `MODO PRO MAX — PARECER DESCRITIVO
 Meta: 8-12 páginas, qualidade publicável. Após compilar, chame assess_quality. Target: score ≥ 80.
 
-EXEMPLAR de análise por dimensão:
+REGRA ANTI-DESERTO: nunca 20+ linhas de texto sem elemento visual (box, tabela, itemize).
+
+EXEMPLAR de análise por dimensão (use este padrão em CADA dimensão):
 
 \\subsection{\\faIcon{comments} Linguagem e Comunicação}
-No início do semestre, Pedro utilizava predominantemente gestos e vocalizações
-para se comunicar, com vocabulário expressivo de aproximadamente 15 palavras.
+No início do semestre, Pedro utilizava gestos e vocalizações, com ~15 palavras.
 \\begin{successbox}[Avanços no Semestre]
 \\begin{itemize}
 \\item Vocabulário ampliou de 15 para 38 palavras funcionais
-\\item Iniciou uso espontâneo de frases de 2 palavras ("quero água", "dá bola")
-\\item Passou a responder ao próprio nome em 8 de 10 chamadas (antes: 3/10)
+\\item Iniciou frases de 2 palavras ("quero água", "dá bola")
+\\item Responde ao nome em 8/10 chamadas (antes: 3/10)
 \\end{itemize}
 \\end{successbox}
-A pragmática permanece como área prioritária — Pedro ainda apresenta dificuldade
-em iniciar interações com pares sem mediação do adulto.
+A pragmática permanece prioritária — dificuldade em iniciar interações sem mediação.
 \\begin{alertbox}[Aspectos em Desenvolvimento]
-Turnos conversacionais limitados a 2 trocas. Manter estratégia de espera
-estruturada (10s) e uso de scripts visuais para situações sociais.
+Turnos conversacionais limitados a 2 trocas. Manter espera estruturada (10s).
 \\end{alertbox}
 
-O parecer deve ser ANALÍTICO e baseado em EVIDÊNCIAS com dados concretos (números, datas,
-frequências). DIAGRAMA RADAR TikZ com 6 dimensões (ideal: 2 áreas sobrepostas — semestre
-anterior vs atual). Tabela comparativa com setas de tendência (↑ ↓ →).
-ESTRUTURA: Capa + sumário + identificação + diagnóstico + avaliação por dimensão (tabela +
-radar) + desempenho acadêmico + comparativo + participação no AEE + estratégias + recomendações.`,
+O parecer deve ser ANALÍTICO com dados concretos (números, datas, frequências).
+DIAGRAMA TikZ: use tikzpicture com nodes (NÃO pgfplots/axis). Para o radar, crie um
+hexágono com 6 vértices rotulados e 2 polígonos coloridos sobrepostos (antes vs agora).
+Tabela comparativa com setas de tendência (\\faIcon{arrow-up}/\\faIcon{arrow-down}/\\faIcon{arrows-alt-h}).
+ESTRUTURA: Capa + sumário + identificação + diagnóstico + avaliação por dimensão (CADA uma
+com successbox + alertbox) + radar TikZ + acadêmico + comparativo + AEE + recomendações.`,
 };

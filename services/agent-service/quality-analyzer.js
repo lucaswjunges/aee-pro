@@ -191,19 +191,31 @@ function findTextDeserts(lines) {
 
 function findEmptySubsections(lines) {
   const empty = [];
-  const sectionRe = /^\\(?:sub)?section\s*(?:\[.*?\])?\s*\{(.+?)\}/;
+  const sectionRe = /^\\((?:sub)?section)\s*(?:\[.*?\])?\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/;
 
   for (let i = 0; i < lines.length; i++) {
     const match = lines[i].match(sectionRe);
     if (!match) continue;
+
+    const cmdType = match[1]; // "section" or "subsection"
+    const title = match[2];
 
     let j = i + 1;
     while (j < lines.length && lines[j].trim() === "") j++;
 
     if (j < lines.length) {
       const nextLine = lines[j].trim();
-      if (/^\\(?:sub)?section\s*[\[{]/.test(nextLine) || /^\\end\{document\}/.test(nextLine)) {
-        empty.push(match[1]);
+      if (cmdType === "section") {
+        // A \section followed by \section or \end{document} is empty
+        // A \section followed by \subsection is VALID (it organizes subsections)
+        if (/^\\section\s*[\[{]/.test(nextLine) || /^\\end\{document\}/.test(nextLine)) {
+          empty.push(title);
+        }
+      } else {
+        // A \subsection followed by any \section, \subsection, or \end{document} is empty
+        if (/^\\(?:sub)?section\s*[\[{]/.test(nextLine) || /^\\end\{document\}/.test(nextLine)) {
+          empty.push(title);
+        }
       }
     }
   }
