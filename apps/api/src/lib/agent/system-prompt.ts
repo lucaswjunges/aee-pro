@@ -114,11 +114,12 @@ function buildToolsLayer(ctx: SystemPromptContext): string {
 - list_files() — lista arquivos do projeto
 - delete_file(path), rename_file(old_path, new_path), search_files(query)
 - compile_latex(path) — compila .tex → PDF (preamble injetado automaticamente)
-- assess_quality(path) — avalia score 0-100 do .tex com fixes prioritários
+- assess_quality(path) — score 0-100 com breakdown (Structure/Visual/Content/Polish) e fixes com +Npt
 - get_student_data(name?) — dados do aluno (sem params = vinculado, com name = busca)
 - get_prompt_template(slug) — template do documento AEE${ctx.isSubAgent ? "" : "\n- spawn_agent(task) — delega tarefa a sub-agente"}
 
-Slugs disponíveis: anamnese, pei, pdi, estudo-de-caso, parecer-descritivo, plano-intervencao, adaptacoes-curriculares, adaptacao-avaliacoes, sugestao-atendimento, diario-bordo, avancos-retrocessos, relatorio-familia, relatorio-professor, ata-reuniao, rotina-visual, e mais 15+ tipos.`;
+FLUXO: get_student_data + get_prompt_template → write_file .tex → compile_latex → assess_quality → se score baixo: edit_file fixes → recompilar → reavaliar
+Slugs: anamnese, pei, pdi, estudo-de-caso, parecer-descritivo, plano-intervencao, adaptacoes-curriculares, adaptacao-avaliacoes, sugestao-atendimento, diario-bordo, avancos-retrocessos, relatorio-familia, relatorio-professor, ata-reuniao, rotina-visual, e mais 15+.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,18 +130,23 @@ function buildAgentSDKToolsLayer(): string {
   return `TOOLS (Claude Agent SDK):
 Built-in: Write, Read, Edit, Bash, Glob, Grep
 MCP (prefixo mcp__aee-tools__):
-- mcp__aee-tools__compile_latex(path) — compila .tex → PDF
-- mcp__aee-tools__assess_quality(path) — avalia score 0-100 com fixes
-- mcp__aee-tools__get_student_data — dados do aluno
-- mcp__aee-tools__get_prompt_template(slug) — template do documento
+- mcp__aee-tools__compile_latex(path) — compila .tex → PDF (preamble injetado automaticamente)
+- mcp__aee-tools__assess_quality(path) — avalia score 0-100 com breakdown e fixes prioritários
+- mcp__aee-tools__get_student_data — dados do aluno vinculado
+- mcp__aee-tools__get_prompt_template(slug) — template do documento AEE
 
 FLUXO PARA CRIAR DOCUMENTO:
-1. mcp__aee-tools__get_student_data → dados do aluno
-2. mcp__aee-tools__get_prompt_template → instruções do documento
-3. Write → criar arquivo .tex
-4. mcp__aee-tools__compile_latex → compilar PDF
-5. mcp__aee-tools__assess_quality → avaliar qualidade
-6. Se score baixo: Edit → corrigir → recompilar → reavaliar`;
+1. get_student_data + get_prompt_template (paralelo)
+2. Write → criar arquivo .tex (path RELATIVO: "anamnese.tex", não absoluto)
+3. compile_latex → compilar PDF
+4. assess_quality → avaliar qualidade (score breakdown + fixes)
+5. Se score < target: Edit → corrigir fixes → recompilar → reavaliar
+
+IMPORTANTE:
+- NUNCA use Bash para compilar LaTeX — use SOMENTE compile_latex
+- Paths de arquivo são RELATIVOS ao projeto (ex: "anamnese.tex", NÃO "/tmp/.../anamnese.tex")
+- get_student_data e get_prompt_template podem ser chamados EM PARALELO
+- Não use TodoWrite — vá direto ao trabalho`;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,20 +240,25 @@ function buildProMaxLayer(): string {
   return `=== MODO PRO MAX ===
 Qualidade de publicação profissional. O documento deve poder ser impresso e entregue sem edição.
 
-APÓS cada compilação bem-sucedida, o sistema chamará assess_quality automaticamente.
-Meta: score ≥ 80/100. Se abaixo, corrija os PRIORITY FIXES indicados e recompile.
+APÓS cada compilação bem-sucedida, chame assess_quality. Ele retorna um SCORE BREAKDOWN:
+  Structure (25pt): capa TikZ, sumário, assinatura, seções, subsections
+  Visual (35pt): boxes coloridos, TikZ, tabelas, ícones, rowcolor, variedade
+  Content (25pt): páginas, densidade, narrativa
+  Polish (15pt): sem desertos, sem subsections vazias, ícones em seções, box density
+Meta: score ≥ 80/100. PRIORITY FIXES mostram exatamente o que corrigir e quantos pontos ganha.
+Se < 80: faça edições PONTUAIS nos fixes (NÃO reescreva tudo) → recompile → reavalie.
 
 EXIGÊNCIAS:
 - Capa TikZ com \\fill[aeeblue], título \\Huge branco, datacard com drop shadow
 - \\tableofcontents após a capa
 - Mínimo 2 diagramas TikZ (radar, mind map, timeline, ou fluxograma)
-- Mínimo 8 páginas
-- Nunca mais de meia página sem elemento visual
+- Mínimo 8 páginas com texto narrativo específico ao aluno
+- Quebrar texto longo com boxes, tabelas ou diagramas (sem "desertos de texto")
 - Tabelas com \\rowcolor alternado aeelightblue/white
 - Análises específicas ao diagnóstico (TEA ≠ TDAH ≠ DI)
-- Variedade de boxes (use 4+ tipos diferentes)
+- Variedade de boxes (4+ tipos: infobox, alertbox, successbox, dicabox, tealbox, etc.)
 
-TikZ snippets e exemplos detalhados estão disponíveis via get_prompt_template — consulte o template do documento para instruções Pro Max específicas.`;
+Consulte get_prompt_template para instruções Pro Max específicas ao tipo de documento.`;
 }
 
 // ---------------------------------------------------------------------------
