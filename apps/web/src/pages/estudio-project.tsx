@@ -30,7 +30,16 @@ export function EstudioProjectPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const [fullscreenPreview, setFullscreenPreview] = useState(false);
-  const [mode, setMode] = useState<"simple" | "advanced">("simple");
+  const [mode, setMode] = useState<"simple" | "advanced" | "promax">(() => {
+    // Auto-activate Pro Max when coming from a template
+    const key = `estudio-template-prompt:${id}`;
+    const hasTemplate = typeof sessionStorage !== "undefined" && sessionStorage.getItem(key);
+    if (hasTemplate) {
+      console.log("[estudio] Template detected, activating Pro Max mode");
+      return "promax";
+    }
+    return "simple";
+  });
   const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>([]);
 
   // Track PDF file timestamps to detect new/recompiled PDFs
@@ -211,6 +220,7 @@ export function EstudioProjectPage() {
               onConversationId={() => {}}
               onFilesChange={handleFilesChange}
               showQuickActions={files.length === 0}
+              qualityMode={mode === "promax" ? "promax" : "standard"}
             />
           )}
           {activeTab === "files" && (
@@ -284,9 +294,9 @@ export function EstudioProjectPage() {
           />
         </div>
 
-        {mode === "simple" ? (
+        {mode === "simple" || mode === "promax" ? (
           <>
-            {/* Chat area (simple mode) */}
+            {/* Chat area (simple/promax mode) */}
             <div className="flex-1 overflow-hidden">
               <Chat
                 projectId={project.id}
@@ -294,6 +304,7 @@ export function EstudioProjectPage() {
                 onConversationId={() => {}}
                 onFilesChange={handleFilesChange}
                 showQuickActions={files.length === 0}
+                qualityMode={mode === "promax" ? "promax" : "standard"}
               />
             </div>
 

@@ -61,7 +61,7 @@ const TEMPLATES: Template[] = [
     description: "Plano Educacional Individualizado com metas e estratégias",
     icon: FileText,
     color: "violet",
-    prompt: "Use o arquivo pei.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste metas, estratégias e cronograma conforme o diagnóstico e necessidades específicas do aluno.",
+    prompt: "Crie um PEI (Plano Educacional Individualizado) completo. Obtenha os dados do aluno com get_student_data e o template com get_prompt_template(slug: pei). Crie o arquivo pei.tex com metas, estratégias e cronograma personalizados ao diagnóstico do aluno. Compile com compile_latex.",
   },
   {
     id: "anamnese",
@@ -69,7 +69,7 @@ const TEMPLATES: Template[] = [
     description: "Avaliação inicial completa do aluno",
     icon: ClipboardList,
     color: "blue",
-    prompt: "Use o arquivo anamnese.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Preencha histórico, desenvolvimento e dados familiares conforme as informações disponíveis.",
+    prompt: "Crie uma Anamnese completa. Obtenha os dados do aluno com get_student_data e o template com get_prompt_template(slug: anamnese). Crie o arquivo anamnese.tex preenchendo histórico, desenvolvimento e dados familiares. Compile com compile_latex.",
   },
   {
     id: "estudo-de-caso",
@@ -77,7 +77,7 @@ const TEMPLATES: Template[] = [
     description: "Análise aprofundada com fundamentação teórica",
     icon: BookOpen,
     color: "indigo",
-    prompt: "Use o arquivo estudo-de-caso.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Adapte a fundamentação teórica, análise e estratégias ao diagnóstico do aluno.",
+    prompt: "Crie um Estudo de Caso completo. Obtenha os dados do aluno com get_student_data e o template com get_prompt_template(slug: estudo-de-caso). Crie o arquivo estudo-de-caso.tex com fundamentação teórica, análise e estratégias adaptadas ao diagnóstico. Compile com compile_latex.",
   },
   {
     id: "parecer-descritivo",
@@ -85,7 +85,7 @@ const TEMPLATES: Template[] = [
     description: "Parecer pedagógico com análise por dimensão",
     icon: MessageSquareText,
     color: "cyan",
-    prompt: "Use o arquivo parecer.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste a análise de cada dimensão do desenvolvimento conforme as observações do aluno.",
+    prompt: "Crie um Parecer Descritivo completo. Obtenha os dados do aluno com get_student_data e o template com get_prompt_template(slug: parecer-descritivo). Crie o arquivo parecer.tex com análise por dimensão do desenvolvimento. Compile com compile_latex.",
   },
   {
     id: "jogo-educativo",
@@ -93,7 +93,7 @@ const TEMPLATES: Template[] = [
     description: "Jogo pedagógico adaptado com regras e peças",
     icon: Puzzle,
     color: "emerald",
-    prompt: "Use o arquivo jogo.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Adapte o jogo às habilidades e necessidades específicas do aluno, ajustando níveis de dificuldade.",
+    prompt: "Crie um Jogo Educativo Imprimível. Obtenha os dados do aluno com get_student_data. Crie o arquivo jogo.tex com um jogo pedagógico adaptado às habilidades do aluno, incluindo regras, peças recortáveis e níveis de dificuldade ajustados. Compile com compile_latex.",
   },
   {
     id: "kit-atividades",
@@ -101,7 +101,7 @@ const TEMPLATES: Template[] = [
     description: "Conjunto de atividades adaptadas por nível",
     icon: Package,
     color: "green",
-    prompt: "Use o arquivo atividades.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Adapte as atividades ao nível e diagnóstico do aluno.",
+    prompt: "Crie um Kit de Atividades adaptadas. Obtenha os dados do aluno com get_student_data. Crie o arquivo atividades.tex com atividades variadas adaptadas ao nível e diagnóstico do aluno. Compile com compile_latex.",
   },
   {
     id: "material-aula",
@@ -109,7 +109,7 @@ const TEMPLATES: Template[] = [
     description: "Sequência didática com adaptações inclusivas",
     icon: GraduationCap,
     color: "amber",
-    prompt: "Use o arquivo aula.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste a sequência didática e adaptações conforme as necessidades do aluno.",
+    prompt: "Crie um Material de Aula Adaptado. Obtenha os dados do aluno com get_student_data. Crie o arquivo aula.tex com sequência didática e adaptações inclusivas conforme as necessidades do aluno. Compile com compile_latex.",
   },
   {
     id: "rotina-visual",
@@ -117,7 +117,7 @@ const TEMPLATES: Template[] = [
     description: "Quadro de rotina visual com imagens descritivas",
     icon: CalendarClock,
     color: "orange",
-    prompt: "Use o arquivo rotina.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste horários, atividades e adaptações sensoriais conforme a rotina do aluno.",
+    prompt: "Crie uma Rotina Visual. Obtenha os dados do aluno com get_student_data e o template com get_prompt_template(slug: rotina-visual). Crie o arquivo rotina.tex com quadro de rotina visual, horários e adaptações sensoriais. Compile com compile_latex.",
   },
   {
     id: "relatorio-evolucao",
@@ -125,7 +125,7 @@ const TEMPLATES: Template[] = [
     description: "Relatório periódico com análise de progresso",
     icon: TrendingUp,
     color: "rose",
-    prompt: "Use o arquivo relatorio.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Atualize os dados de evolução, gráficos e metas conforme o progresso observado.",
+    prompt: "Crie um Relatório de Evolução. Obtenha os dados do aluno com get_student_data. Crie o arquivo relatorio.tex com análise de progresso, gráficos de evolução e metas atualizadas. Compile com compile_latex.",
   },
   {
     id: "relatorio-familia",
@@ -133,7 +133,7 @@ const TEMPLATES: Template[] = [
     description: "Devolutiva acessível para pais e responsáveis",
     icon: Heart,
     color: "pink",
-    prompt: "Use o arquivo relatorio-familia.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Ajuste as conquistas e orientações mantendo linguagem acolhedora e acessível.",
+    prompt: "Crie um Relatório para Família. Obtenha os dados do aluno com get_student_data e o template com get_prompt_template(slug: relatorio-familia). Crie o arquivo relatorio-familia.tex com linguagem acolhedora e acessível, destacando conquistas e orientações. Compile com compile_latex.",
   },
   {
     id: "apresentacao-reuniao",
@@ -141,7 +141,7 @@ const TEMPLATES: Template[] = [
     description: "Slides profissionais para reunião pedagógica",
     icon: Presentation,
     color: "fuchsia",
-    prompt: "Use o arquivo apresentacao.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Atualize os slides com dados reais do aluno e sua evolução.",
+    prompt: "Crie uma Apresentação para Reunião pedagógica. Obtenha os dados do aluno com get_student_data. Crie o arquivo apresentacao.tex com slides profissionais usando beamer, incluindo dados do aluno e sua evolução. Compile com compile_latex.",
   },
   {
     id: "tcc-aee",
@@ -149,7 +149,7 @@ const TEMPLATES: Template[] = [
     description: "Trabalho acadêmico com estrutura ABNT",
     icon: FileStack,
     color: "slate",
-    prompt: "Use o arquivo tcc.tex existente neste projeto como base. Personalize com os dados do aluno vinculado ao projeto usando get_student_data e compile com compile_latex. Desenvolva o estudo de caso com base no diagnóstico e atendimento do aluno.",
+    prompt: "Crie um TCC sobre AEE. Obtenha os dados do aluno com get_student_data. Crie o arquivo tcc.tex com estrutura ABNT, desenvolvendo um estudo de caso com base no diagnóstico e atendimento do aluno. Compile com compile_latex.",
   },
 ];
 

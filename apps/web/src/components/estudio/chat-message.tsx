@@ -20,6 +20,8 @@ import {
   CheckCircle2,
   XCircle,
   RefreshCw,
+  Copy,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -126,6 +128,7 @@ export function ChatMessage({
         {toolPairs.length > 0 && (
           <ToolCallGroup
             pairs={toolPairs}
+            rawEvents={toolCalls}
             autoAccept={autoAccept}
             onUndoFile={onUndoFile}
             isFromHistory={isFromHistory}
@@ -287,12 +290,13 @@ function groupToolEvents(events: RawSSEEvent[], forceComplete = false): ToolPair
   return pairs;
 }
 
-function ToolCallGroup({ pairs, autoAccept, onUndoFile, isFromHistory }: { pairs: ToolPair[]; autoAccept?: boolean; onUndoFile?: (fileId: string, versionId: string) => Promise<void>; isFromHistory?: boolean }) {
+function ToolCallGroup({ pairs, rawEvents, autoAccept, onUndoFile, isFromHistory }: { pairs: ToolPair[]; rawEvents?: RawSSEEvent[]; autoAccept?: boolean; onUndoFile?: (fileId: string, versionId: string) => Promise<void>; isFromHistory?: boolean }) {
   // Auto-expand when reviewing edits (autoAccept off, has file-modifying tools)
   const hasReviewableTools = !autoAccept && pairs.some(
     (p) => p.type === "tool" && ["write_file", "edit_file", "delete_file"].includes(p.tool || "") && p.result?.versionId
   );
   const [expanded, setExpanded] = useState(hasReviewableTools && !isFromHistory);
+  const [copied, setCopied] = useState(false);
   const completedCount = pairs.filter((p) => p.completed).length;
   // If ANY compile_latex succeeded → green (even if earlier attempts failed, the goal was achieved)
   const hasCompileSuccess = pairs.some(
@@ -335,9 +339,9 @@ function ToolCallGroup({ pairs, autoAccept, onUndoFile, isFromHistory }: { pairs
       >
         {allDone ? (
           hasErrors ? (
-            <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="text-current flex-shrink-0 text-xs font-bold leading-none">!</span>
           ) : (
-            <Check className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="text-current flex-shrink-0 text-xs font-bold leading-none">✓</span>
           )
         ) : (
           <Wrench className="h-3.5 w-3.5 flex-shrink-0 animate-spin" />
@@ -356,17 +360,27 @@ function ToolCallGroup({ pairs, autoAccept, onUndoFile, isFromHistory }: { pairs
 
       {/* Expanded detail list */}
       {expanded && (
-        <div className="mt-1 rounded-lg border bg-muted/30 divide-y divide-border/50 overflow-hidden">
-          {pairs.map((pair, i) => (
-            <ToolCallDetail
-              key={i}
-              pair={pair}
-              autoAccept={autoAccept}
-              onUndoFile={onUndoFile}
-              isFromHistory={isFromHistory}
-            />
-          ))}
-        </div>
+        <>
+          <div className="mt-1 rounded-lg border bg-muted/30 divide-y divide-border/50 overflow-hidden">
+            {pairs.map((pair, i) => (
+              <ToolCallDetail
+                key={i}
+                pair={pair}
+                autoAccept={autoAccept}
+                onUndoFile={onUndoFile}
+                isFromHistory={isFromHistory}
+              />
+            ))}
+          </div>
+          {/* Copyable plain-text log */}
+          <ToolCallLog rawEvents={rawEvents} pairs={pairs} copied={copied} onCopy={() => {
+            const text = buildToolLogText(rawEvents, pairs);
+            navigator.clipboard.writeText(text).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            });
+          }} />
+        </>
       )}
     </div>
   );
@@ -452,16 +466,16 @@ function ToolCallDetail({ pair, autoAccept, onUndoFile, isFromHistory }: { pair:
         title={hoverTitle}
         className="flex items-center gap-2 w-full text-left"
       >
-        {/* Status icon */}
+        {/* Status indicator — text chars so they're copyable via select-all */}
         {canReview && reviewState === "undone" ? (
-          <XCircle className="h-3 w-3 text-amber-500 flex-shrink-0" />
+          <span className="text-amber-500 flex-shrink-0 text-xs font-bold leading-none">✗</span>
         ) : canReview && reviewState === "accepted" ? (
-          <CheckCircle2 className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+          <span className="text-emerald-500 flex-shrink-0 text-xs font-bold leading-none">✓</span>
         ) : pair.completed ? (
           isError ? (
-            <AlertTriangle className="h-3 w-3 text-red-500 flex-shrink-0" />
+            <span className="text-red-500 flex-shrink-0 text-xs font-bold leading-none">!</span>
           ) : (
-            <Check className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+            <span className="text-emerald-500 flex-shrink-0 text-xs font-bold leading-none">✓</span>
           )
         ) : (
           <Icon className="h-3 w-3 text-amber-500 animate-spin flex-shrink-0" />
@@ -476,6 +490,20 @@ function ToolCallDetail({ pair, autoAccept, onUndoFile, isFromHistory }: { pair:
         </span>
         {detail && (
           <span className="text-muted-foreground truncate flex-1">{detail}</span>
+        )}
+        {/* Compact result summary — useful context when copy-pasting */}
+        {pair.completed && resultText && (
+          <span className={cn(
+            "text-[10px] truncate max-w-[200px] flex-shrink",
+            isError ? "text-red-400/70" : "text-emerald-600/50 dark:text-emerald-400/50"
+          )}>
+            {isError
+              ? `→ ${resultText.slice(0, 80)}`
+              : resultText.length > 60
+                ? `→ ${resultText.slice(0, 60)}…`
+                : `→ ${resultText}`
+            }
+          </span>
         )}
         {/* Review state badges */}
         {canReview && reviewState === "accepted" && !isFromHistory && (
@@ -542,6 +570,79 @@ function ToolCallDetail({ pair, autoAccept, onUndoFile, isFromHistory }: { pair:
           {resultText.length > 500 ? resultText.slice(0, 500) + "..." : resultText}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─────────── Copyable tool log ───────────
+
+/** Build a plain-text log of all tool events for copy-paste */
+function buildToolLogText(rawEvents?: RawSSEEvent[], pairs?: ToolPair[]): string {
+  // Prefer raw events for full fidelity; fall back to pairs
+  if (rawEvents && rawEvents.length > 0) {
+    const lines: string[] = [];
+    for (const ev of rawEvents) {
+      if (ev.type === "tool_call") {
+        const inputSummary = ev.toolInput
+          ? Object.entries(ev.toolInput)
+              .map(([k, v]) => {
+                const val = typeof v === "string" ? v : JSON.stringify(v);
+                // Truncate large values (content, old_text, new_text) to keep log readable
+                const truncated = val.length > 200 ? val.slice(0, 200) + "…" : val;
+                return `${k}: ${truncated}`;
+              })
+              .join(", ")
+          : "";
+        lines.push(`[tool_call] ${ev.tool}(${inputSummary})`);
+      } else if (ev.type === "tool_result") {
+        const res = ev.result;
+        if (res && typeof res === "object") {
+          const r = res as Record<string, unknown>;
+          const ok = r.success !== false;
+          const text = (r.output || r.error || "") as string;
+          const truncated = text.length > 300 ? text.slice(0, 300) + "…" : text;
+          lines.push(`[tool_result] ${ev.tool} → ${ok ? "OK" : "ERRO"}: ${truncated}`);
+        } else {
+          lines.push(`[tool_result] ${ev.tool} → ${ev.content || "(sem resultado)"}`);
+        }
+      } else if (ev.type === "agent_spawn") {
+        lines.push(`[agent_spawn] ${ev.agentTask || "tarefa"} (id: ${ev.agentId || "?"})`);
+      } else if (ev.type === "agent_result") {
+        const text = ev.content || "";
+        const truncated = text.length > 300 ? text.slice(0, 300) + "…" : text;
+        lines.push(`[agent_result] ${ev.agentId || "?"}: ${truncated}`);
+      }
+    }
+    return lines.join("\n");
+  }
+  // Fallback: build from pairs
+  if (pairs) {
+    return pairs.map((p) => {
+      if (p.type === "agent") {
+        return `[agent] ${p.agentTask || "tarefa"} → ${p.agentResult ? p.agentResult.slice(0, 200) : "(sem resultado)"}`;
+      }
+      const detail = getToolDetail(p.tool || "", p.toolInput);
+      const status = !p.completed ? "executando..." : p.result?.success === false ? `ERRO: ${p.result.error || ""}` : `OK: ${(p.result?.output || "").slice(0, 200)}`;
+      return `[${p.tool}] ${detail} → ${status}`;
+    }).join("\n");
+  }
+  return "(sem dados)";
+}
+
+function ToolCallLog({ rawEvents, pairs, copied, onCopy }: { rawEvents?: RawSSEEvent[]; pairs: ToolPair[]; copied: boolean; onCopy: () => void }) {
+  const logText = buildToolLogText(rawEvents, pairs);
+  return (
+    <div className="mt-1 relative group/log">
+      <button
+        onClick={onCopy}
+        className="absolute top-1.5 right-1.5 p-1 rounded-md bg-muted/80 hover:bg-muted text-muted-foreground/60 hover:text-foreground transition-colors z-10"
+        title="Copiar log"
+      >
+        {copied ? <ClipboardCheck className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+      </button>
+      <pre className="rounded-lg border bg-zinc-950 dark:bg-zinc-950 text-zinc-300 px-3 py-2 text-[10px] font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto leading-relaxed select-text">
+        {logText}
+      </pre>
     </div>
   );
 }
@@ -630,7 +731,7 @@ function getToolDetail(tool: string, input?: Record<string, unknown>): string {
     case "get_prompt_template":
       return input.slug ? String(input.slug) : "";
     case "get_student_data":
-      return input.student_id ? String(input.student_id).slice(0, 8) + "..." : "";
+      return input.name ? String(input.name) : input.student_id ? String(input.student_id).slice(0, 8) + "..." : "";
     case "spawn_agent":
       return input.task ? String(input.task).slice(0, 50) : "";
     default:

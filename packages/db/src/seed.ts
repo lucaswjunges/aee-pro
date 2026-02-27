@@ -797,6 +797,43 @@ DADOS DO ALUNO:
 
 Gere o documento de forma clara, objetiva, profissional e funcional. O parecer deve ser adequado para registro escolar oficial. Adapte o conteúdo aos dados disponíveis.`,
   },
+  {
+    id: "prompt-sugestao-atendimento",
+    slug: "sugestao-atendimento",
+    name: "Sugestão de Atendimento",
+    description: "Sugestão completa de atendimento AEE com banco de atividades por área, planejamento semanal, indicadores de progresso e recursos recomendados. Visual publicável e acolhedor.",
+    category: "planejamento",
+    sortOrder: 15,
+    requiredFields: JSON.stringify(["name", "diagnosis", "grade"]),
+    promptTemplate: `Elabore uma SUGESTÃO DE ATENDIMENTO AEE — guia prático, acolhedor e visualmente rico.
+
+SEÇÕES:
+1. Perfil do Aluno e Objetivos (5 objetivos por área + expectativa da família)
+2. Estrutura Padrão das Sessões (Acolhida 5min → Principal 20min → Complementar 12min → Fechamento 5-8min + materiais fixos)
+3. Banco de Atividades — Leitura/Consciência Fonológica (3 atividades)
+4. Banco de Atividades — Escrita (2 atividades, uma com progressão visual)
+5. Banco de Atividades — Socialização/Comunicação (2 atividades)
+6. Banco de Atividades — Autonomia/Rotina (2 atividades, uma com circuito de estações)
+7. Planejamento Semanal (4 semanas, 2 sessões/semana)
+8. Indicadores de Progresso (ficha de registro + metas mensuráveis por área)
+9. Recursos Gratuitos (ARASAAC, apps, timers visuais)
+10. Orientações ao Professor Regular
+
+Cada atividade: nome criativo, objtags coloridos, descrição, materiais concretos (massinha, EVA, velcro, areia), passo a passo com 5+ etapas e falas da professora entre aspas, variações, tempo. Intercalar com dicabox.
+
+DADOS DO ALUNO:
+{{name}} | {{dateOfBirth}} | {{grade}} | {{turma}} | {{school}} | Prof AEE: {{teacherName}}
+Diagnóstico: {{diagnosis}} ({{diagnosticoCid}}, {{classificacao}})
+Medicamentos: {{medicamentos}} | Terapias: {{terapiasAtuais}}
+Motor: {{desenvMotor}} | Linguagem: {{desenvLinguagem}} | Cognitivo: {{desenvCognitivo}}
+Social: {{desenvSocial}} | Autonomia: {{desenvAutonomia}} | Emocional: {{comportamentoEmocional}}
+Leitura: {{habLeitura}} | Escrita: {{habEscrita}} | Matemática: {{habMatematica}}
+Atendimento: {{tipoAtendimento}}, {{frequencia}}
+Dificuldades: {{dificuldadesIniciais}} | Potencialidades: {{potencialidades}}
+Barreiras: {{barreiras}} | Obs: {{observations}}
+
+ESTILO: Lúdico, colorido, convidativo. Não burocrático. Atividades adequadas ao diagnóstico e faixa etária.`,
+  },
 ];
 
 // This is used as a SQL seed. Export the data for use in migration or API seed endpoint.

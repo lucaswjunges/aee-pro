@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Send, StopCircle, Sparkles, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Send, StopCircle, Sparkles, Crown, ShieldCheck, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "./chat-message";
 import { QuickActions } from "./quick-actions";
@@ -60,6 +60,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   toolCalls?: SSEEvent[];
+  queued?: boolean;
 }
 
 interface ChatProps {
@@ -68,6 +69,7 @@ interface ChatProps {
   onConversationId: (id: string) => void;
   onFilesChange: () => void;
   showQuickActions: boolean;
+  qualityMode?: "standard" | "promax";
 }
 
 export function Chat({
@@ -76,11 +78,14 @@ export function Chat({
   onConversationId,
   onFilesChange,
   showQuickActions,
+  qualityMode,
 }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const isStreamingRef = useRef(false); // Mirror for use in async callbacks
+  const [messageQueue, setMessageQueue] = useState<string[]>([]);
+  const messageQueueRef = useRef<string[]>([]);
   const [isThinking, setIsThinking] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [streamToolCalls, setStreamToolCalls] = useState<SSEEvent[]>([]);
@@ -237,6 +242,9 @@ export function Chat({
             "Content-Type": "application/json",
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
+          body: JSON.stringify({
+            ...(qualityMode === "promax" ? { qualityMode: "promax" } : {}),
+          }),
           signal: abortController.signal,
         }
       );
@@ -261,8 +269,9 @@ export function Chat({
       let buffer = "";
       let fullText = "";
       const allToolCalls: SSEEvent[] = [];
+      let receivedDone = false;
 
-      while (true) {
+      while (!receivedDone) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -307,6 +316,9 @@ export function Chat({
               setIsThinking(false);
               debouncedFilesChange.flush();
               onFilesChange();
+              receivedDone = true;
+              reader.cancel().catch(() => {});
+              break;
             }
           } catch {
             // Ignore malformed SSE
@@ -410,7 +422,23 @@ export function Chat({
   }, []);
 
   const sendMessage = async (text: string) => {
-    if (!text.trim() || isStreaming) return;
+    if (!text.trim()) return;
+
+    if (isStreaming) {
+      const trimmed = text.trim();
+      messageQueueRef.current = [...messageQueueRef.current, trimmed];
+      setMessageQueue([...messageQueueRef.current]);
+      setInput("");
+      pushToHistory(trimmed);
+      setMessages((prev) => [...prev, {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: trimmed,
+        queued: true,
+      }]);
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      return;
+    }
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
@@ -448,6 +476,7 @@ export function Chat({
           body: JSON.stringify({
             message: text.trim(),
             conversationId,
+            ...(qualityMode === "promax" ? { qualityMode: "promax" } : {}),
           }),
           signal: abortController.signal,
         }
@@ -472,8 +501,9 @@ export function Chat({
       let buffer = "";
       let fullText = "";
       const allToolCalls: SSEEvent[] = [];
+      let receivedDone = false;
 
-      while (true) {
+      while (!receivedDone) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -517,9 +547,11 @@ export function Chat({
               setIsThinking(false);
             } else if (event.type === "done") {
               setIsThinking(false);
-              // Flush any pending debounced refresh, then do final refresh
               debouncedFilesChange.flush();
               onFilesChange();
+              receivedDone = true;
+              reader.cancel().catch(() => {});
+              break;
             }
           } catch {
             // Ignore malformed SSE
@@ -560,6 +592,26 @@ export function Chat({
       isStreamingRef.current = false;
       setIsThinking(false);
       abortControllerRef.current = null;
+
+      // Process next message in queue
+      const next = messageQueueRef.current[0];
+      if (next) {
+        messageQueueRef.current = messageQueueRef.current.slice(1);
+        setMessageQueue([...messageQueueRef.current]);
+        // Remove queued flag from the message about to be processed
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.role === "user" && m.queued && m.content === next);
+          if (idx !== -1) {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], queued: false };
+            return updated;
+          }
+          return prev;
+        });
+        setTimeout(() => sendMessage(next), 100);
+        return;
+      }
+
       // Re-focus textarea so user can type immediately
       setTimeout(() => textareaRef.current?.focus(), 50);
       // Fetch AI-powered suggestion for next prompt
@@ -569,6 +621,9 @@ export function Chat({
 
   const handleStop = () => {
     abortControllerRef.current?.abort();
+    messageQueueRef.current = [];
+    setMessageQueue([]);
+    setMessages((prev) => prev.map((m) => m.queued ? { ...m, queued: false } : m));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -663,6 +718,14 @@ export function Chat({
               <p className="text-sm text-muted-foreground mt-1">
                 Descreva o que deseja criar ou escolha uma ação rápida
               </p>
+              {qualityMode === "promax" && (
+                <div className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 rounded-full bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
+                  <Crown className="h-3.5 w-3.5 text-amber-500" />
+                  <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                    Modo Pro Max ativo — Claude Opus com qualidade publicável
+                  </span>
+                </div>
+              )}
             </div>
             {showQuickActions && (
               <QuickActions onAction={(prompt) => sendMessage(prompt)} />
@@ -671,18 +734,24 @@ export function Chat({
         ) : (
           <>
             {messages.map((msg) => (
-              <ChatMessage
-                key={msg.id}
-                id={msg.id}
-                role={msg.role}
-                content={msg.content}
-                toolCalls={msg.toolCalls}
-                autoAccept={autoAccept}
-                onUndoFile={handleUndoFile}
-                onDelete={handleDeleteMessage}
-                onRegenerate={handleRegenerate}
-                globalStreaming={isStreaming}
-              />
+              <div key={msg.id} className="relative">
+                <ChatMessage
+                  id={msg.id}
+                  role={msg.role}
+                  content={msg.content}
+                  toolCalls={msg.toolCalls}
+                  autoAccept={autoAccept}
+                  onUndoFile={handleUndoFile}
+                  onDelete={handleDeleteMessage}
+                  onRegenerate={handleRegenerate}
+                  globalStreaming={isStreaming}
+                />
+                {msg.queued && (
+                  <span className="inline-block ml-12 -mt-1 mb-2 text-[10px] text-muted-foreground/60 bg-muted/50 rounded px-1.5 py-0.5">
+                    Na fila
+                  </span>
+                )}
+              </div>
             ))}
             {isStreaming && (
               <ChatMessage
@@ -732,19 +801,29 @@ export function Chat({
               className="w-full resize-none rounded-xl border bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[42px] max-h-[150px]"
               style={{ background: "transparent" }}
               rows={1}
-              disabled={isStreaming}
             />
           </div>
           {isStreaming ? (
-            <Button
-              variant="destructive"
-              size="icon"
-              className="rounded-xl h-[42px] w-[42px]"
-              onClick={handleStop}
-              title="Parar"
-            >
-              <StopCircle className="h-4 w-4" />
-            </Button>
+            <>
+              <Button
+                size="icon"
+                className="rounded-xl h-[42px] w-[42px]"
+                onClick={() => sendMessage(input)}
+                disabled={!input.trim()}
+                title="Enfileirar (Enter)"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="destructive"
+                size="icon"
+                className="rounded-xl h-[42px] w-[42px]"
+                onClick={handleStop}
+                title="Parar"
+              >
+                <StopCircle className="h-4 w-4" />
+              </Button>
+            </>
           ) : (
             <Button
               size="icon"
@@ -757,6 +836,21 @@ export function Chat({
             </Button>
           )}
         </div>
+        {messageQueue.length > 0 && (
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70 px-1 mt-1">
+            <span>{messageQueue.length} na fila</span>
+            <button
+              onClick={() => {
+                messageQueueRef.current = [];
+                setMessageQueue([]);
+                setMessages((prev) => prev.map((m) => m.queued ? { ...m, queued: false } : m));
+              }}
+              className="text-destructive hover:underline"
+            >
+              limpar
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-between mt-1.5 px-1">
           <button
             onClick={toggleAutoAccept}

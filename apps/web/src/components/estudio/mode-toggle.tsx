@@ -1,9 +1,9 @@
-import { Sparkles, Code } from "lucide-react";
+import { Sparkles, Code, Crown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ModeToggleProps {
-  mode: "simple" | "advanced";
-  onModeChange: (mode: "simple" | "advanced") => void;
+  mode: "simple" | "advanced" | "promax";
+  onModeChange: (mode: "simple" | "advanced" | "promax") => void;
 }
 
 export function ModeToggle({ mode, onModeChange }: ModeToggleProps) {
@@ -32,6 +32,19 @@ export function ModeToggle({ mode, onModeChange }: ModeToggleProps) {
       >
         <Code className="h-3 w-3" />
         Avançado
+      </button>
+      <button
+        onClick={() => onModeChange("promax")}
+        title="Usa Claude Opus — qualidade máxima, custo ~10x maior"
+        className={cn(
+          "flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors",
+          mode === "promax"
+            ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm"
+            : "text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300"
+        )}
+      >
+        <Crown className="h-3 w-3" />
+        Pro Max
       </button>
     </div>
   );
