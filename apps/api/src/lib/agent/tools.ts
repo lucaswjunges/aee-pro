@@ -102,10 +102,12 @@ export const WORKSPACE_TOOLS: ToolDefinition[] = [
   {
     name: "get_student_data",
     description:
-      "Retorna dados completos do aluno vinculado ao projeto. Não precisa de parâmetro — o aluno é resolvido automaticamente.",
+      "Retorna dados completos do aluno. Se o projeto tem aluno vinculado, retorna automaticamente. Se não, use o parâmetro 'name' para buscar por nome (busca parcial). Sem parâmetros e sem vínculo: lista todos os alunos disponíveis.",
     input_schema: {
       type: "object",
-      properties: {},
+      properties: {
+        name: { type: "string", description: "Nome (parcial) do aluno para buscar. Opcional — se omitido, usa o aluno vinculado ao projeto." },
+      },
     },
   },
   {

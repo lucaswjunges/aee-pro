@@ -114,11 +114,22 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
 \\setlist[itemize]{leftmargin=1.5em, itemsep=2pt, parsep=0pt}
 \\setlist[enumerate]{leftmargin=1.5em, itemsep=2pt, parsep=0pt}
 
-% --- Icons shortcut ---
+% --- Icons ---
+\\usepackage{fontawesome5}
 \\newcommand{\\cmark}{\\ding{51}}
 \\newcommand{\\starmark}{\\ding{72}}
 \\newcommand{\\hand}{\\ding{43}}
 \\newcommand{\\bulb}{\\ding{228}}
+
+% --- Field macros (for structured data cards) ---
+\\newcommand{\\field}[2]{\\textcolor{textgray}{\\small #1:} & \\textbf{#2} \\\\[3pt]}
+\\newcommand{\\fieldline}[2]{\\textcolor{aeeblue}{\\faCaretRight}~\\textcolor{textgray}{#1:} \\textbf{#2}}
+
+% --- Multi-column ---
+\\usepackage{multicol}
+
+% --- Page count ---
+\\usepackage{lastpage}
 
 % --- Headers & Footers ---
 \\usepackage{fancyhdr}
@@ -195,10 +206,13 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
-\\newtcolorbox{datacard}{
+\\newtcolorbox{datacard}[1][]{
   enhanced, breakable,
   colback=aeegray,
   colframe=aeeblue!30,
+  coltitle=white,
+  fonttitle=\\bfseries,
+  title={#1},
   rounded corners,
   boxrule=0.5pt,
   left=10pt, right=10pt, top=8pt, bottom=8pt,
@@ -264,6 +278,62 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   before upper app={\\tolerance=9999\\emergencystretch=3em}
 }
 
+\\newtcolorbox{warnbox}[1][]{
+  enhanced, breakable,
+  colback=lightorange,
+  colframe=aeeorange!70,
+  coltitle=white,
+  fonttitle=\\bfseries,
+  title=#1,
+  rounded corners,
+  boxrule=0.8pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt,
+  before skip=10pt, after skip=10pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
+}
+
+\\newtcolorbox{tealbox}[1][]{
+  enhanced, breakable,
+  colback=lightteal,
+  colframe=aeeteal!70,
+  coltitle=white,
+  fonttitle=\\bfseries,
+  title=#1,
+  rounded corners,
+  boxrule=0.8pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt,
+  before skip=10pt, after skip=10pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
+}
+
+\\newtcolorbox{purplebox}[1][]{
+  enhanced, breakable,
+  colback=lightpurple,
+  colframe=aeepurple!70,
+  coltitle=white,
+  fonttitle=\\bfseries,
+  title=#1,
+  rounded corners,
+  boxrule=0.8pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt,
+  before skip=10pt, after skip=10pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
+}
+
+\\newtcolorbox{goldbox}[1][]{
+  enhanced, breakable,
+  colback=lightyellow,
+  colframe=aeegold!70,
+  coltitle=aeeblue,
+  fonttitle=\\bfseries,
+  title=#1,
+  rounded corners,
+  boxrule=0.8pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt,
+  before skip=10pt, after skip=10pt,
+  before upper app={\\tolerance=9999\\emergencystretch=3em}
+}
+
 \\newtcbox{\\objtag}[1][aeeblue]{
   on line, colback=#1!10, colframe=#1!40,
   boxrule=0.4pt, arc=3pt,
@@ -282,6 +352,9 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
 \\usepackage[hyphens]{url}
 \\usepackage{xurl}
 
+% --- Float control ---
+\\usepackage{float}
+
 % --- Hyperlinks ---
 \\usepackage[
   colorlinks=${printMode === "bw" ? "false" : "true"},
@@ -292,6 +365,91 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
 
 % ============================================================================
 `;
+}
+
+/**
+ * Extract document metadata (title, student name, school) from raw LaTeX source.
+ * Tries multiple patterns with fallbacks.
+ */
+export function extractDocMetadata(source: string): {
+  title: string;
+  studentName: string;
+  schoolName: string;
+} {
+  let title = "Documento AEE";
+  let studentName = "";
+  let schoolName = "";
+
+  // Title: \title{...}
+  const titleMatch = source.match(/\\title\{([^}]+)\}/);
+  if (titleMatch) {
+    title = titleMatch[1].replace(/\\[a-zA-Z]+\{([^}]*)\}/g, "$1").trim();
+  } else {
+    // Fallback: first \section{...}
+    const sectionMatch = source.match(/\\section\*?\{([^}]+)\}/);
+    if (sectionMatch) {
+      title = sectionMatch[1].replace(/\\[a-zA-Z]+\{([^}]*)\}/g, "$1").trim();
+    }
+  }
+
+  // Student name from \fancyhead content: pattern "Name --- School"
+  const fancyMatch = source.match(/\\fancyhead\[R\]\{[^}]*\\truncate\{[^}]*\}\{([^}]+)\}\}/);
+  if (fancyMatch) {
+    const parts = fancyMatch[1].split("---").map((s) => s.trim());
+    if (parts.length >= 2) {
+      studentName = parts[0];
+      schoolName = parts[1];
+    } else if (parts.length === 1) {
+      studentName = parts[0];
+    }
+  }
+
+  // Fallback: \author{...} for student name
+  if (!studentName) {
+    const authorMatch = source.match(/\\author\{([^}]+)\}/);
+    if (authorMatch) {
+      studentName = authorMatch[1].replace(/\\[a-zA-Z]+\{([^}]*)\}/g, "$1").trim();
+    }
+  }
+
+  return { title, studentName, schoolName };
+}
+
+/**
+ * Replace the AI-generated preamble with the professional AEE preamble.
+ * Keeps everything from \begin{document} onwards intact.
+ */
+export function injectProfessionalPreamble(
+  source: string,
+  fallbackTitle?: string,
+  fallbackStudent?: string,
+  fallbackSchool?: string
+): string {
+  const beginDocIdx = source.indexOf("\\begin{document}");
+  if (beginDocIdx === -1) {
+    // No \begin{document} — return as-is (shouldn't happen for valid LaTeX)
+    return source;
+  }
+
+  // Extract metadata from the AI-generated preamble before we replace it
+  const preambleSection = source.substring(0, beginDocIdx);
+  const meta = extractDocMetadata(preambleSection);
+
+  const title = meta.title !== "Documento AEE" ? meta.title : (fallbackTitle || "Documento AEE");
+  const studentName = meta.studentName || fallbackStudent || "";
+  const schoolName = meta.schoolName || fallbackSchool || "";
+
+  // Generate professional preamble
+  const professionalPreamble = getLatexPreamble({
+    documentTitle: title,
+    studentName,
+    schoolName,
+  });
+
+  // Body = everything from \begin{document} onwards
+  const body = source.substring(beginDocIdx);
+
+  return professionalPreamble + "\n" + body;
 }
 
 function escapeLatex(text: string): string {

@@ -231,21 +231,25 @@ export const DOCUMENT_TYPE_CONFIGS: Record<string, DocumentTypeConfig> = {
   "sugestao-atendimento": {
     slug: "sugestao-atendimento",
     name: "Sugestão de Atendimento",
-    instruction: `Gere uma SUGESTÃO DE ATENDIMENTO AEE completa contendo:
-- Capa profissional
-- Perfil do aluno e objetivos (diagrama TikZ se heat >= 3)
-- Estrutura padrão das sessões (fluxo visual TikZ se heat >= 3)
-- Banco de atividades por área com atividadebox:
-  - Leitura e consciência fonológica (3+ atividades)
-  - Escrita (2+ atividades)
-  - Socialização e comunicação (2+ atividades)
-  - Autonomia e rotina (2+ atividades)
-  Cada atividade: descrição, materiais, passo a passo, tempo, variações
-- Sessaobox com planejamento semanal (4 semanas)
-- Indicadores de progresso e metas mensuráveis
-- Ficha de registro de sessão
-- Recursos gratuitos recomendados
-- Mind map do perfil do aluno (se heat >= 4)`,
+    instruction: `Gere uma SUGESTÃO DE ATENDIMENTO AEE com visual PUBLICÁVEL, acolhedor e rico.
+Este é um guia prático de atividades — deve ser bonito, colorido e convidativo, não um relatório burocrático.
+Use generosamente os ambientes visuais disponíveis (atividadebox, dicabox, sessaobox, materialbox, successbox, infobox, objtag).
+
+ESTRUTURA OBRIGATÓRIA:
+1. CAPA TikZ elaborada: retângulo aeeblue no topo, título \\Huge aeegold, card branco com drop shadow contendo dados do aluno (nome, idade, diagnóstico, escola, professora AEE, frequência, data), fileira de ícones TikZ representando as 5 áreas (Leitura, Escrita, Social, Autonomia, Comunicação)
+2. \\tableofcontents + \\newpage
+3. PERFIL E OBJETIVOS: Diagrama TikZ estilo mind map com o aluno no centro e 5 objetivos ao redor (cada um em block colorido com setas). Seguido de dicabox com a expectativa da família.
+4. ESTRUTURA DAS SESSÕES: Diagrama TikZ de fluxo horizontal com 4 fases (Acolhida→Atividade Principal→Complementar→Fechamento), cada fase com cor distinta, label de tempo acima. Seguido de materialbox com material fixo.
+5. BANCO DE ATIVIDADES — LEITURA (3 atividades): Cada uma em atividadebox[aeegreen] com \\starmark, objtags coloridos, descrição rica, lista de materiais, passo a passo numerado detalhado, variações, tempo estimado. Intercalar com dicabox de dicas práticas.
+6. BANCO DE ATIVIDADES — ESCRITA (2+ atividades): atividadebox[aeeblue]. Uma delas DEVE ter diagrama TikZ de progressão (ex: Fase 1→2→3→4→5 com setas).
+7. BANCO DE ATIVIDADES — SOCIALIZAÇÃO E COMUNICAÇÃO (2+ atividades): atividadebox[aeepurple]
+8. BANCO DE ATIVIDADES — AUTONOMIA E ROTINA (2+ atividades): atividadebox[aeeorange]. Uma DEVE ter tabularx com estações de circuito com \\rowcolor alternado.
+9. PLANEJAMENTO SEMANAL (4 semanas): Cada semana em sessaobox[Semana N — Foco: X] com tabularx interna (colunas: Dia, Acolhida, Atividade Principal, Complementar, Fechamento) e \\rowcolor{aeelightblue} alternado.
+10. INDICADORES DE PROGRESSO: Ficha de registro em TikZ (node com tabularx dentro, drop shadow, cabeçalho aeeblue com texto branco, campos: data, atividade, engajamento, apoio, comportamento, conquista, observações). Tabela de metas mensuráveis por área com \\rowcolor{lightgreen} alternado.
+11. RECURSOS GRATUITOS: Tabela com recurso, descrição, tipo (App/Online), com \\rowcolor{aeelightblue} alternado.
+12. Assinaturas (seguir modelo do system prompt) + rodapé com créditos AEE+ PRO.
+
+QUALIDADE VISUAL: Cada atividade deve ocupar pelo menos meia página. Use \\objtag coloridos generosamente. Alterne texto com boxes — nunca mais de meia página sem elemento visual. As descrições das atividades devem ser DETALHADAS e PRÁTICAS (materiais reais, passos numerados específicos, dicas para o professor).`,
   },
   "ficha-matricula-aee": {
     slug: "ficha-matricula-aee",
@@ -546,3 +550,108 @@ export const DOCUMENT_TYPE_CONFIGS: Record<string, DocumentTypeConfig> = {
 export function getDocumentTypeConfig(slug: string): DocumentTypeConfig | undefined {
   return DOCUMENT_TYPE_CONFIGS[slug];
 }
+
+// ---------------------------------------------------------------------------
+// Pro Max Enhancements — injected when qualityMode === "promax"
+// ---------------------------------------------------------------------------
+
+export const PRO_MAX_ENHANCEMENTS: Record<string, string> = {
+  "anamnese": `MODO PRO MAX — ANAMNESE DE QUALIDADE PUBLICÁVEL:
+Produza um documento de 10-15 páginas com visual de livro profissional.
+
+SEÇÕES OBRIGATÓRIAS (15 seções, nesta ordem):
+1. CAPA TikZ elaborada: retângulo aeeblue cobrindo topo da página, título \\Huge em branco, subtítulo aeegold, card branco centralizado com drop shadow contendo dados (aluno, escola, professor AEE, data), fileira de ícones TikZ no rodapé da capa.
+2. \\tableofcontents + \\newpage
+3. IDENTIFICAÇÃO: datacard completo com TODOS os campos do aluno. Use tabularx com \\rowcolor alternado.
+4. HISTÓRICO GESTACIONAL E DE NASCIMENTO: gestação, intercorrências, parto, condições de nascimento, APGAR, peso, permanência hospitalar. Use infobox.
+5. DESENVOLVIMENTO NEUROPSICOMOTOR: marcos motores, linguagem, controle esfincteriano, alimentação. Tabela com idade esperada vs idade alcançada com \\rowcolor.
+6. HISTÓRICO DE SAÚDE: diagnósticos, CID, medicações atuais e passadas, alergias, internações, cirurgias. Use alertbox para diagnósticos.
+7. DIAGRAMA RADAR TikZ: gráfico radar/aranha com 6 dimensões (Cognitivo, Motor, Linguagem, Social, Autonomia, Acadêmico), cada eixo de 0-5, área preenchida com opacidade. Use draw e fill com coordenadas polares.
+8. PERFIL DE DESENVOLVIMENTO: análise detalhada de cada dimensão (cognitivo, motor, linguagem, social, emocional, autonomia). Cada dimensão em subsection com texto rico + successbox ou alertbox conforme nível.
+9. CONTEXTO FAMILIAR E SOCIOECONÔMICO: composição familiar, dinâmica, participação, renda, moradia. Use datacard.
+10. HISTÓRICO ESCOLAR: escolas anteriores, retenções, adaptações, AEE anterior, relação com escola. Tabela cronológica com \\rowcolor.
+11. HABILIDADES ACADÊMICAS: leitura (nível), escrita (nível), matemática (nível), outras áreas. Tabela detalhada + infobox com potencialidades.
+12. COMPORTAMENTO E SOCIALIZAÇÃO: interação com pares, adultos, comportamento em sala, recreio, regulação emocional. Use dicabox com estratégias.
+13. TERAPIAS E ACOMPANHAMENTOS: terapias atuais (tipo, frequência, profissional), evolução percebida. Tabela com \\rowcolor.
+14. EXPECTATIVAS DA FAMÍLIA: o que esperam do AEE, preocupações, sonhos. Use successbox.
+15. CONSIDERAÇÕES FINAIS E ENCAMINHAMENTOS: síntese, próximos passos, assinaturas no formato tabular padrão.
+
+QUALIDADE VISUAL: Cada seção deve ter pelo menos 1 elemento visual (box, tabela, diagrama). Nunca mais de meia página sem elemento visual.`,
+
+  "estudo-de-caso": `MODO PRO MAX — ESTUDO DE CASO DE QUALIDADE PUBLICÁVEL:
+Produza um documento de 10-15 páginas com visual de livro profissional.
+
+ELEMENTOS OBRIGATÓRIOS:
+1. CAPA TikZ elaborada (mesmo padrão da anamnese)
+2. \\tableofcontents + \\newpage
+3. Dados de identificação em datacard completo
+4. Diagnóstico e saúde em alertbox detalhado
+5. TIMELINE TikZ: linha do tempo horizontal com marcos do desenvolvimento do aluno (nascimento → diagnóstico → início escolar → início AEE → momento atual). Cada marco como node com data, cor distinta por tipo de evento.
+6. MIND MAP TikZ: diagrama de mapa mental com aluno no centro, 6 ramos (Cognitivo, Motor, Linguagem, Social, Autonomia, Acadêmico), cada ramo com 2-3 sub-nós com informações específicas. Use cores distintas por ramo.
+7. Análise detalhada por dimensão: cada uma com \\subsection, texto rico, successbox para pontos fortes, alertbox para dificuldades.
+8. DIAGRAMA de Barreiras vs Potencialidades: TikZ com duas colunas (vermelho/verde), itens como nodes com setas.
+9. Estratégias de intervenção em tabela detalhada com \\rowcolor alternado.
+10. Cronograma de acompanhamento em tabela (bimestre, objetivo, ação, responsável).
+11. Orientações à família em successbox.
+12. Orientações à equipe escolar em infobox.
+13. Assinaturas no formato tabular padrão.
+
+QUALIDADE VISUAL: Mínimo 2 diagramas TikZ (timeline + mind map). Nunca mais de meia página sem elemento visual.`,
+
+  "pdi": `MODO PRO MAX — PDI DE QUALIDADE PUBLICÁVEL:
+Produza um documento de 8-12 páginas com visual de livro profissional.
+
+ELEMENTOS OBRIGATÓRIOS:
+1. CAPA TikZ elaborada
+2. \\tableofcontents + \\newpage
+3. Dados de identificação em datacard completo
+4. Perfil funcional detalhado com alertbox para dificuldades e successbox para potencialidades
+5. TABELA DE METAS SMART: Para cada dimensão (Cognitivo, Linguagem, Motor, Social, Autonomia, Acadêmico), tabularx com colunas: Meta Específica | Indicador Mensurável | Estratégia | Recurso | Prazo | Status. Use \\rowcolor alternado, cabeçalho com cellcolor{aeeblue} e texto branco.
+6. CRONOGRAMA TikZ: diagrama Gantt simplificado com meses no eixo X e metas no eixo Y, barras coloridas por dimensão.
+7. Seção de adaptações curriculares com tabela por disciplina.
+8. Articulação AEE ↔ Sala regular em infobox.
+9. Indicadores de progresso: tabela de avaliação periódica (bimestral) com escala visual.
+10. DIAGRAMA TikZ de conexões: como avanço em uma dimensão impacta as outras (nodes conectados por setas com labels).
+11. Orientações para família em dicabox.
+12. Assinaturas no formato tabular padrão.
+
+As metas devem ser genuinamente SMART: específicas ao diagnóstico do aluno, com indicadores numéricos/observáveis, prazos realistas.`,
+
+  "sugestao-atendimento": `MODO PRO MAX — SUGESTÃO DE ATENDIMENTO DE QUALIDADE PUBLICÁVEL:
+Produza um documento de 12-18 páginas — o mais rico e visual possível.
+
+AMPLIFICAÇÕES PRO MAX (além da estrutura base do template):
+- Cada atividade deve ter MÍNIMO 8 passos no passo-a-passo (não 3-4 genéricos)
+- Inclua VARIAÇÕES de dificuldade para cada atividade (nível 1: com apoio total, nível 2: com apoio parcial, nível 3: independente)
+- Adicione ao menos 3 diagramas TikZ:
+  1. Mind map de objetivos (central: aluno, ramos: áreas, folhas: objetivos específicos)
+  2. Fluxograma de sessão (Acolhida→Atividade→Complementar→Fechamento) com tempos
+  3. Diagrama de progressão de habilidades (Fase 1→2→3→4→5 com critérios)
+- Planejamento semanal: 4 semanas COMPLETAS com atividades específicas (não genéricas)
+- Banco de atividades: MÍNIMO 12 atividades totais (4 leitura, 3 escrita, 3 socialização, 2 autonomia)
+- Cada atividadebox deve mencionar materiais REAIS e acessíveis (não "materiais diversos")
+- Ficha de registro em TikZ com design de formulário profissional
+- Tabela de recursos gratuitos com pelo menos 8 recursos REAIS (apps e sites que existem)
+
+QUALIDADE VISUAL: Este documento deve parecer um guia profissional publicado, não um relatório escolar.`,
+
+  "parecer-descritivo": `MODO PRO MAX — PARECER DESCRITIVO DE QUALIDADE PUBLICÁVEL:
+Produza um documento de 8-12 páginas com visual de livro profissional.
+
+ELEMENTOS OBRIGATÓRIOS:
+1. CAPA TikZ elaborada
+2. \\tableofcontents + \\newpage
+3. Dados de identificação em datacard completo
+4. Diagnóstico e contexto em alertbox
+5. TABELA DE AVALIAÇÃO por dimensão: tabularx com colunas Dimensão | Nível (1-5) | Descrição | Evidências. Use \\rowcolor alternado, ícones (\\cmark, \\starmark) para destaque.
+6. DIAGRAMA RADAR TikZ: mesmo padrão da anamnese, 6 dimensões, área preenchida. Se possível, duas áreas sobrepostas (semestre anterior vs atual) com cores diferentes e legenda.
+7. Desenvolvimento detalhado por dimensão: cada uma com \\subsection, texto analítico, successbox para avanços, alertbox para dificuldades.
+8. Desempenho acadêmico: tabela detalhada por componente (Leitura, Escrita, Interpretação, Matemática — operações, problemas, geometria).
+9. COMPARATIVO SEMESTRAL: tabela lado a lado (1º sem vs 2º sem) com setas de tendência (↑ ↓ →) por dimensão.
+10. Participação no AEE: frequência, engajamento, atividades mais eficazes.
+11. Estratégias utilizadas e efetividade em tabela com \\rowcolor.
+12. Recomendações organizadas por destinatário (AEE, sala regular, família).
+13. Assinaturas no formato tabular padrão.
+
+O parecer deve ser ANALÍTICO e BASEADO EM EVIDÊNCIAS, não genérico. Cite comportamentos específicos observados.`,
+};

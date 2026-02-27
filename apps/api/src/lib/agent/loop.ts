@@ -39,6 +39,8 @@ export interface AgentLoopOptions {
   conversationSummary?: string;
   /** User-configured max output tokens (overrides default) */
   maxOutputTokens?: number;
+  /** Quality mode — "promax" forces Opus, higher thinking, auto-refinement */
+  qualityMode?: "standard" | "promax";
 }
 
 interface ClaudeMessage {
@@ -100,7 +102,8 @@ const yieldEventLoop = () => new Promise<void>((r) => setTimeout(r, 0));
 export async function* runAgentLoop(
   opts: AgentLoopOptions
 ): AsyncGenerator<SSEEvent> {
-  const maxIter = opts.maxIterations ?? 25;
+  const isProMax = opts.qualityMode === "promax";
+  const maxIter = opts.maxIterations ?? (isProMax ? 35 : 25);
   const tools: ToolDefinition[] = opts.isSubAgent
     ? SUBAGENT_TOOLS
     : WORKSPACE_TOOLS;
@@ -114,15 +117,23 @@ export async function* runAgentLoop(
     files: opts.files,
     isSubAgent: opts.isSubAgent,
     conversationSummary: opts.conversationSummary,
+    qualityMode: opts.qualityMode,
   });
 
   const messages: ClaudeMessage[] = [...opts.messages];
-  const isAnthropic = opts.providerType === "anthropic";
-  const enableThinking = opts.enableThinking && isAnthropic && supportsThinking(opts.model);
-  const defaultMax = getMaxTokens(opts.model, isAnthropic);
+  // Detect if we should use the Anthropic Messages API path:
+  // - Direct Anthropic provider
+  // - OpenRouter routing to an Anthropic/Claude model
+  const anthropicApi = getAnthropicApiConfig(opts.providerType, opts.model);
+  const useAnthropicPath = anthropicApi !== null;
+  const enableThinking = opts.enableThinking && useAnthropicPath && supportsThinking(anthropicApi?.model || opts.model);
+  const defaultMax = getMaxTokens(anthropicApi?.model || opts.model, useAnthropicPath);
   const maxTokens = opts.maxOutputTokens
     ? Math.min(opts.maxOutputTokens, defaultMax)
     : defaultMax;
+
+  let hallucinationCorrected = false;
+  let proMaxRefinementDone = false; // Track whether auto-refinement has been injected
 
   for (let iteration = 0; iteration < maxIter; iteration++) {
     // Yield between iterations so the event loop can serve other requests
@@ -135,23 +146,33 @@ export async function* runAgentLoop(
     };
 
     try {
-      if (isAnthropic) {
-        // ---- Streaming path for Anthropic ----
+      if (useAnthropicPath && anthropicApi) {
+        // ---- Streaming path for Anthropic (direct or via OpenRouter) ----
         const accumulated: ClaudeContentBlock[] = [];
         let stopReason = "end_turn";
 
         for await (const chunk of streamAnthropicWithTools(
           opts.apiKey,
-          opts.model,
+          anthropicApi.model,
           systemPrompt,
           messages,
           tools,
-          { thinking: enableThinking, maxTokens }
+          {
+            thinking: enableThinking,
+            maxTokens,
+            thinkingBudget: isProMax ? 16000 : undefined,
+            apiUrl: anthropicApi.url,
+            authType: anthropicApi.authType,
+          }
         )) {
           if (chunk.type === "text_delta" && chunk.text) {
             yield { type: "text", content: chunk.text };
           } else if (chunk.type === "thinking_delta" && chunk.thinking) {
             yield { type: "thinking", content: chunk.thinking };
+          } else if (chunk.type === "tool_input_progress") {
+            // Keepalive: emit a thinking event so the SSE stream doesn't go silent
+            // during large tool inputs (e.g. write_file with 800+ lines of LaTeX)
+            yield { type: "thinking", content: "" };
           } else if (chunk.type === "complete" && chunk.response) {
             accumulated.push(...chunk.response.content);
             stopReason = chunk.response.stop_reason;
@@ -195,8 +216,32 @@ export async function* runAgentLoop(
       (b) => b.type === "tool_use"
     );
 
-    // If no tool calls, we're done
+    // If no tool calls, check for truncation or hallucinated completion
     if (toolUseBlocks.length === 0) {
+      // max_tokens hit during a tool_use → input JSON was truncated, tool was lost
+      // Ask the model to retry with a shorter approach
+      if (response.stop_reason === "max_tokens") {
+        messages.push({ role: "assistant", content: response.content });
+        messages.push({
+          role: "user",
+          content: "Sua resposta foi cortada por limite de tokens — o write_file não foi executado. Reescreva o documento de forma mais COMPACTA (menos texto decorativo, mesma estrutura) e chame write_file + compile_latex.",
+        });
+        yield { type: "text", content: "\n\n*(Documento muito grande — reescrevendo em formato mais compacto...)*\n" };
+        continue;
+      }
+
+      const lastText = response.content.find((b) => b.type === "text")?.text || "";
+      if (!hallucinationCorrected && looksLikeHallucinatedAction(lastText)) {
+        // AI claimed to have compiled/written but didn't call any tools — correct it
+        hallucinationCorrected = true;
+        messages.push({ role: "assistant", content: response.content });
+        messages.push({
+          role: "user",
+          content: "Você NÃO executou as ações — nenhuma ferramenta foi chamada. Chame write_file/edit_file e compile_latex AGORA.",
+        });
+        yield { type: "text", content: "\n\n*(Corrigindo: a IA descreveu ações sem executá-las. Retentando...)*\n" };
+        continue;
+      }
       yield { type: "done" };
       return;
     }
@@ -218,20 +263,58 @@ export async function* runAgentLoop(
       };
     }
 
-    // Execute normal tools in parallel
+    // Execute normal tools — file-producing tools first, then consumers (compile_latex)
+    // This prevents race conditions where compile_latex runs before write_file/edit_file finish
     if (normalBlocks.length > 0) {
-      const parallelResults = await Promise.all(
-        normalBlocks.map(async (toolBlock) => {
-          const result = await executeTool(
-            toolBlock.name!,
-            toolBlock.input!,
-            opts.toolCtx
-          );
-          return { toolBlock, result };
-        })
-      );
+      const FILE_PRODUCERS = new Set(["write_file", "edit_file", "rename_file", "delete_file"]);
+      const FILE_CONSUMERS = new Set(["compile_latex"]);
 
-      for (const { toolBlock, result } of parallelResults) {
+      const producers = normalBlocks.filter((b) => FILE_PRODUCERS.has(b.name!));
+      const consumers = normalBlocks.filter((b) => FILE_CONSUMERS.has(b.name!));
+      const others = normalBlocks.filter((b) => !FILE_PRODUCERS.has(b.name!) && !FILE_CONSUMERS.has(b.name!));
+
+      // Phase 1: producers + others in parallel
+      const phase1Blocks = [...producers, ...others];
+      const phase1Results: { toolBlock: typeof normalBlocks[0]; result: Awaited<ReturnType<typeof executeTool>> }[] = [];
+
+      if (phase1Blocks.length > 0) {
+        const results = await Promise.all(
+          phase1Blocks.map(async (toolBlock) => {
+            const result = await executeTool(
+              toolBlock.name!,
+              toolBlock.input!,
+              opts.toolCtx
+            );
+            return { toolBlock, result };
+          })
+        );
+        phase1Results.push(...results);
+      }
+
+      // Phase 2: consumers (compile_latex) — only after producers finished
+      const phase2Results: typeof phase1Results = [];
+      if (consumers.length > 0) {
+        const results = await Promise.all(
+          consumers.map(async (toolBlock) => {
+            const result = await executeTool(
+              toolBlock.name!,
+              toolBlock.input!,
+              opts.toolCtx
+            );
+            return { toolBlock, result };
+          })
+        );
+        phase2Results.push(...results);
+      }
+
+      // Yield results in original order so frontend sees them correctly
+      const allResults = new Map<string, Awaited<ReturnType<typeof executeTool>>>();
+      for (const { toolBlock, result } of [...phase1Results, ...phase2Results]) {
+        allResults.set(toolBlock.id!, result);
+      }
+
+      for (const toolBlock of normalBlocks) {
+        const result = allResults.get(toolBlock.id!)!;
         yield {
           type: "tool_result",
           tool: toolBlock.name!,
@@ -296,6 +379,35 @@ export async function* runAgentLoop(
     // Yield after tool execution before next iteration
     await yieldEventLoop();
 
+    // Pro Max auto-refinement: after first successful compile_latex, inject review prompt
+    if (isProMax && !proMaxRefinementDone) {
+      const hasSuccessfulCompile = toolUseBlocks.some((b) => b.name === "compile_latex") &&
+        toolResults.some((tr) => tr.tool_use_id && !tr.is_error && (tr.content as string)?.includes("Compilação bem-sucedida"));
+      if (hasSuccessfulCompile) {
+        proMaxRefinementDone = true;
+        // Merge tool results + refinement prompt in a SINGLE user message
+        // (two consecutive user messages break Anthropic API alternation rule)
+        const texFile = toolUseBlocks.find((b) => b.name === "compile_latex")?.input?.path as string || "main.tex";
+        const refinementPrompt: ClaudeContentBlock = {
+          type: "text",
+          text: `REVISÃO PRO MAX: O PDF foi compilado, mas ainda pode melhorar. Leia ${texFile} com read_file e avalie criticamente:
+1. Tem capa TikZ elaborada (retângulo colorido + card com shadow)? Se não, adicione.
+2. Tem \\tableofcontents? Se não, adicione após a capa.
+3. Tem pelo menos 2 diagramas TikZ (radar, mind map, timeline, fluxograma)? Se não, adicione os mais relevantes.
+4. Todas as tabelas têm \\rowcolor alternado? Se não, corrija.
+5. Há trechos com mais de meia página sem elemento visual? Se sim, adicione boxes ou diagramas.
+6. O documento tem pelo menos 8 páginas? Se não, aprofunde as seções mais fracas.
+7. As análises são específicas ao diagnóstico do aluno ou genéricas? Se genéricas, reescreva com especificidade.
+8. Usa variedade de boxes (infobox, alertbox, successbox, warnbox, tealbox, purplebox, goldbox, datacard)? Se não, diversifique.
+
+Corrija o que for necessário com edit_file (edições pontuais, NÃO reescreva o arquivo inteiro) e recompile com compile_latex.`,
+        };
+        messages.push({ role: "user", content: [...toolResults, refinementPrompt] });
+        yield { type: "text", content: "\n\n*Revisando qualidade Pro Max...*\n" };
+        continue;
+      }
+    }
+
     // Add tool results to history
     messages.push({ role: "user", content: toolResults });
 
@@ -355,9 +467,11 @@ async function runSubAgent(
 // ---------------------------------------------------------------------------
 
 interface StreamChunk {
-  type: "text_delta" | "thinking_delta" | "complete";
+  type: "text_delta" | "thinking_delta" | "tool_input_progress" | "complete";
   text?: string;
   thinking?: string;
+  toolName?: string;
+  inputLength?: number;
   response?: {
     content: ClaudeContentBlock[];
     stop_reason: string;
@@ -374,7 +488,15 @@ async function* streamAnthropicWithTools(
   systemPrompt: string,
   messages: ClaudeMessage[],
   tools: ToolDefinition[],
-  options: { thinking?: boolean; maxTokens: number }
+  options: {
+    thinking?: boolean;
+    maxTokens: number;
+    thinkingBudget?: number;
+    /** Override API URL (e.g. OpenRouter's Anthropic-compatible endpoint) */
+    apiUrl?: string;
+    /** Auth method: "x-api-key" for direct Anthropic, "bearer" for OpenRouter */
+    authType?: "x-api-key" | "bearer";
+  }
 ): AsyncGenerator<StreamChunk> {
   const body: Record<string, unknown> = {
     model,
@@ -398,32 +520,40 @@ async function* streamAnthropicWithTools(
 
   // Extended thinking for supported models
   if (options.thinking) {
+    const defaultBudget = Math.min(10000, Math.floor(options.maxTokens / 4));
     body.thinking = {
       type: "enabled",
-      budget_tokens: Math.min(10000, Math.floor(options.maxTokens / 4)),
+      budget_tokens: options.thinkingBudget ?? defaultBudget,
     };
     // Anthropic constraint: thinking requires temperature=1
     body.temperature = 1;
+  }
+
+  const url = options.apiUrl || "https://api.anthropic.com/v1/messages";
+  const headers: Record<string, string> = {
+    "anthropic-version": "2025-04-15",
+    "Content-Type": "application/json",
+  };
+  if (options.authType === "bearer") {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  } else {
+    headers["x-api-key"] = apiKey;
   }
 
   const anthropicController = new AbortController();
   const anthropicTimeout = setTimeout(() => anthropicController.abort(), 120_000); // 120s for streaming
   let res: Response;
   try {
-    res = await fetch("https://api.anthropic.com/v1/messages", {
+    res = await fetch(url, {
       method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2025-04-15",
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify(body),
       signal: anthropicController.signal,
     });
   } catch (err) {
     clearTimeout(anthropicTimeout);
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("Tempo limite excedido (120s) aguardando resposta da Anthropic.");
+      throw new Error("Tempo limite excedido (120s) aguardando resposta da API.");
     }
     throw err;
   }
@@ -450,6 +580,7 @@ async function* streamAnthropicWithTools(
   let currentTextParts: string[] = [];
   let thinkingText = "";
   let thinkingSignature = "";
+  let lastToolProgressAt = 0;
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -504,6 +635,13 @@ async function* streamAnthropicWithTools(
             yield { type: "text_delta", text };
           } else if (deltaType === "input_json_delta") {
             toolJsonParts.push(delta.partial_json as string);
+            // Emit periodic progress so the SSE stream stays alive during large tool inputs (e.g. write_file with 800+ lines)
+            const now = Date.now();
+            if (now - lastToolProgressAt >= 5000) {
+              lastToolProgressAt = now;
+              const totalLen = toolJsonParts.reduce((a, b) => a + b.length, 0);
+              yield { type: "tool_input_progress", toolName: currentToolName || undefined, inputLength: totalLen };
+            }
           } else if (deltaType === "thinking_delta") {
             const thinking = delta.thinking as string;
             thinkingText += thinking;
@@ -814,27 +952,92 @@ async function callOpenAICompatibleWithTools(
 }
 
 // ---------------------------------------------------------------------------
+// Hallucination Detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect when the AI claims to have performed actions (compile, write, edit)
+ * without actually calling any tools. This typically happens when the AI
+ * runs out of output budget or gets confused by long conversation history.
+ */
+function looksLikeHallucinatedAction(text: string): boolean {
+  if (!text || text.length < 20) return false;
+  const lower = text.toLowerCase();
+  const actionPatterns = [
+    "compilação bem-sucedida",
+    "compilação foi concluída",
+    "compilei o documento",
+    "compilei novamente",
+    "recompilei",
+    "pdf gerado",
+    "pdf foi gerado",
+    "corrigi o arquivo",
+    "corrigi a seção",
+    "reescrevi o arquivo",
+    "substituí o conteúdo",
+    "arquivo atualizado",
+    "arquivo corrigido",
+    "[executei ",
+    "[resultado ",
+    "resultado compile_latex",
+    "resultado write_file",
+  ];
+  return actionPatterns.some((p) => lower.includes(p));
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Check if model supports extended thinking */
+/**
+ * Determine Anthropic-compatible API config for a given provider + model.
+ * Returns null if the provider/model combo should use the OpenAI-compatible path.
+ *
+ * Handles:
+ * - Direct Anthropic → api.anthropic.com with x-api-key
+ * - OpenRouter with Claude model → openrouter.ai with Bearer token (Anthropic Messages API)
+ */
+interface AnthropicApiConfig {
+  url: string;
+  authType: "x-api-key" | "bearer";
+  /** Effective model name for the Anthropic API (e.g. "claude-opus-4-6") */
+  model: string;
+}
+
+function getAnthropicApiConfig(providerType: string, model: string): AnthropicApiConfig | null {
+  if (providerType === "anthropic") {
+    return {
+      url: "https://api.anthropic.com/v1/messages",
+      authType: "x-api-key",
+      model,
+    };
+  }
+  // OpenRouter uses the OpenAI-compatible path (no Anthropic Messages API passthrough)
+  return null;
+}
+
 function supportsThinking(model: string): boolean {
+  // Strip provider prefix for matching (e.g. "anthropic/claude-opus-4-6" → "claude-opus-4-6")
+  const baseModel = model.includes("/") ? model.split("/").pop()! : model;
   const thinkingModels = [
     "claude-opus-4",
     "claude-sonnet-4",
     "claude-haiku-4",
   ];
-  return thinkingModels.some((m) => model.startsWith(m));
+  return thinkingModels.some((m) => baseModel.startsWith(m));
 }
 
 /** Dynamic max_tokens based on model capabilities */
-function getMaxTokens(model: string, isAnthropic: boolean): number {
-  if (!isAnthropic) return 16000;
+function getMaxTokens(model: string, isAnthropicPath: boolean): number {
+  if (!isAnthropicPath) return 16000;
+
+  // Strip provider prefix for matching
+  const baseModel = model.includes("/") ? model.split("/").pop()! : model;
 
   // Claude 4.x models support higher output
-  if (model.startsWith("claude-opus-4")) return 32000;
-  if (model.startsWith("claude-sonnet-4")) return 64000;
-  if (model.startsWith("claude-haiku-4")) return 8192;
+  if (baseModel.startsWith("claude-opus-4")) return 32000;
+  if (baseModel.startsWith("claude-sonnet-4")) return 64000;
+  if (baseModel.startsWith("claude-haiku-4")) return 8192;
 
   // Default for unknown Anthropic models
   return 16000;
