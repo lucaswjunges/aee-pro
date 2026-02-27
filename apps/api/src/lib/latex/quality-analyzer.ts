@@ -5,6 +5,11 @@
  * Counts structural elements, visual density, content depth.
  * Returns a score 0-100 with actionable priority fixes.
  *
+ * Architecture (Signals & Systems):
+ *   Score = Σ(subsystem scores) - penalties
+ *   Each subsystem has a clear max, so the agent can see exactly where to gain points.
+ *   The report includes a SCORE BREAKDOWN (feedforward) enabling predictive correction.
+ *
  * Used by both Workers (tool-executor) and Fly.io (mcp-tools).
  */
 
@@ -38,13 +43,24 @@ export interface QualityMetrics {
   // Computed
   score: number;
   grade: "A" | "B" | "C" | "D" | "F";
+
+  // Score breakdown (feedforward for the agent)
+  scoreBreakdown: ScoreBreakdown;
+}
+
+interface ScoreBreakdown {
+  structure: { earned: number; max: number };
+  visual: { earned: number; max: number };
+  content: { earned: number; max: number };
+  polish: { earned: number; max: number };
+  penalties: number;
 }
 
 interface QualityFix {
-  priority: number; // 1 = most important
+  priority: number;
   category: string;
   message: string;
-  location?: string;
+  points: number; // how many points this fix is worth
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +83,33 @@ const TCOLORBOX_ENVS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Visual line detection (for text desert analysis)
+// ---------------------------------------------------------------------------
+
+const VISUAL_PATTERNS = [
+  /\\begin\{(?:tikzpicture|tabularx?|longtable|itemize|enumerate|description)\}/,
+  /\\begin\{(?:infobox|alertbox|successbox|datacard|atividadebox|dicabox|materialbox|sessaobox|warnbox|tealbox|purplebox|goldbox)\}/,
+  /\\end\{(?:infobox|alertbox|successbox|datacard|atividadebox|dicabox|materialbox|sessaobox|warnbox|tealbox|purplebox|goldbox)\}/,
+  /\\begin\{tcolorbox\}/,
+  /\\end\{tcolorbox\}/,
+  /\\faIcon\{/,
+  /\\includegraphics/,
+  /\\rowcolor/,
+  /\\section\s*[\[{]/,
+  /\\subsection\s*[\[{]/,
+  /\\field\{/,
+  /\\objtag/,
+  /\\starmark/,
+  /\\cmark/,
+];
+
+function isVisualLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed === "" || trimmed.startsWith("%")) return true;
+  return VISUAL_PATTERNS.some((p) => p.test(trimmed));
+}
+
+// ---------------------------------------------------------------------------
 // Main analysis function
 // ---------------------------------------------------------------------------
 
@@ -75,20 +118,16 @@ export function analyzeLatexStructure(source: string): QualityMetrics {
   const totalLines = lines.length;
 
   // --- Structure ---
-  const sectionMatches = source.match(/\\section\s*[\[{]/g) || [];
-  const subsectionMatches = source.match(/\\subsection\s*[\[{]/g) || [];
-  const sectionCount = sectionMatches.length;
-  const subsectionCount = subsectionMatches.length;
+  const sectionCount = (source.match(/\\section\s*[\[{]/g) || []).length;
+  const subsectionCount = (source.match(/\\subsection\s*[\[{]/g) || []).length;
 
-  // Cover page: TikZ with fill covering page top area (any color, not just aeeblue)
+  // Cover page: TikZ overlay with \fill covering page area
   const hasCoverPage =
     /\\begin\{tikzpicture\}.*?remember picture.*?overlay/s.test(source) &&
     /\\fill\[.*?\].*?current page/s.test(source);
 
-  // Table of contents
   const hasTableOfContents = /\\tableofcontents/.test(source);
 
-  // Signature block: line for signature or \assinatura
   const hasSignatureBlock =
     /\\rule\{.*?\}\{.*?\}.*?(?:Assinatura|assinatura|Professor|Responsável)/is.test(source) ||
     /assinatura|\\vfill.*?\\rule/is.test(source) ||
@@ -105,7 +144,7 @@ export function analyzeLatexStructure(source: string): QualityMetrics {
       coloredBoxCount += matches.length;
     }
   }
-  // Also count raw \begin{tcolorbox} (agents sometimes use this directly)
+  // Also count raw \begin{tcolorbox}
   const rawTcolorboxCount = (source.match(/\\begin\{tcolorbox\}/g) || []).length;
   if (rawTcolorboxCount > 0) {
     coloredBoxTypes["tcolorbox"] = rawTcolorboxCount;
@@ -113,41 +152,29 @@ export function analyzeLatexStructure(source: string): QualityMetrics {
   }
 
   // TikZ diagrams (excluding cover page overlay)
-  const tikzBlocks = source.match(/\\begin\{tikzpicture\}/g) || [];
-  // Subtract 1 if cover page uses tikzpicture
+  const tikzBlocks = (source.match(/\\begin\{tikzpicture\}/g) || []).length;
   const tikzDiagramCount = hasCoverPage
-    ? Math.max(0, tikzBlocks.length - 1)
-    : tikzBlocks.length;
+    ? Math.max(0, tikzBlocks - 1)
+    : tikzBlocks;
 
   // Tables
-  const tabularMatches = source.match(/\\begin\{(?:tabularx?|longtable)\}/g) || [];
-  const tableCount = tabularMatches.length;
-
-  // Row coloring
-  const rowColorMatches = source.match(/\\rowcolor/g) || [];
-  const rowColorCount = rowColorMatches.length;
-
-  // FontAwesome icons
-  const iconMatches = source.match(/\\faIcon\{/g) || [];
-  const iconCount = iconMatches.length;
+  const tableCount = (source.match(/\\begin\{(?:tabularx?|longtable)\}/g) || []).length;
+  const rowColorCount = (source.match(/\\rowcolor/g) || []).length;
+  const iconCount = (source.match(/\\faIcon\{/g) || []).length;
 
   // --- Content analysis ---
   const contentLines = lines.filter(
     (l) => l.trim() !== "" && !l.trim().startsWith("%")
   ).length;
 
-  // Estimate pages: ~45 content lines per page (with environments, spacing)
   const envOverhead = coloredBoxCount * 4 + tikzDiagramCount * 8 + tableCount * 5;
   const estimatedPages = Math.max(1, Math.round((contentLines + envOverhead) / 42));
 
-  // Text deserts: consecutive lines of pure text (no environments, no commands)
   const textDeserts = findTextDeserts(lines);
-
-  // Empty subsections: subsection followed by another section/subsection without content
   const emptySubsections = findEmptySubsections(lines);
 
-  // --- Compute score ---
-  const score = computeScore({
+  // --- Compute score with breakdown ---
+  const { score, breakdown } = computeScore({
     estimatedPages,
     sectionCount,
     subsectionCount,
@@ -164,8 +191,6 @@ export function analyzeLatexStructure(source: string): QualityMetrics {
     contentLines,
     textDeserts,
     emptySubsections,
-    score: 0,
-    grade: "F",
   });
 
   const grade =
@@ -190,81 +215,114 @@ export function analyzeLatexStructure(source: string): QualityMetrics {
     emptySubsections,
     score,
     grade,
+    scoreBreakdown: breakdown,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Score computation
+// Score computation — recalibrated so max=100 is achievable
 // ---------------------------------------------------------------------------
+//
+// Subsystems and their max points:
+//   STRUCTURE  (25): cover(6) + toc(4) + signature(3) + sections(8) + subsections(4)
+//   VISUAL     (35): boxes(12) + tikz(8) + tables(6) + icons(4) + rowcolors(3) + box diversity(2)
+//   CONTENT    (25): pages(15) + content density(5) + narrative ratio(5)
+//   POLISH     (15): no deserts(6) + no empty subs(4) + icons in sections(3) + has lists(2)
+//   PENALTIES: deserts(-4 each), empty subs(-3 each), <3 pages(-5)
+//
+// Total achievable: 100 (a well-crafted document hits 85-95)
 
-function computeScore(m: QualityMetrics): number {
-  let score = 0;
+function computeScore(m: {
+  estimatedPages: number;
+  sectionCount: number;
+  subsectionCount: number;
+  hasCoverPage: boolean;
+  hasTableOfContents: boolean;
+  hasSignatureBlock: boolean;
+  coloredBoxCount: number;
+  coloredBoxTypes: Record<string, number>;
+  tikzDiagramCount: number;
+  tableCount: number;
+  rowColorCount: number;
+  iconCount: number;
+  totalLines: number;
+  contentLines: number;
+  textDeserts: Array<{ startLine: number; endLine: number; lineCount: number }>;
+  emptySubsections: string[];
+}): { score: number; breakdown: ScoreBreakdown } {
 
-  // === STRUCTURE (max 30 pts) ===
-  // Cover page: 8 pts
-  if (m.hasCoverPage) score += 8;
-  // Table of contents: 5 pts
-  if (m.hasTableOfContents) score += 5;
-  // Signature block: 4 pts
-  if (m.hasSignatureBlock) score += 4;
-  // Sections: 0-8 pts (1pt per section, max 8)
-  score += Math.min(m.sectionCount, 8);
-  // Subsections: 0-5 pts (1pt per 2 subsections, max 5)
-  score += Math.min(Math.floor(m.subsectionCount / 2), 5);
+  // === STRUCTURE (max 25) ===
+  let structure = 0;
+  if (m.hasCoverPage) structure += 6;
+  if (m.hasTableOfContents) structure += 4;
+  if (m.hasSignatureBlock) structure += 3;
+  structure += Math.min(m.sectionCount, 8);       // 1pt per section, max 8
+  structure += Math.min(Math.floor(m.subsectionCount / 2), 4); // 1pt per 2 subs, max 4
+  const structureMax = 25;
 
-  // === VISUAL DENSITY (max 30 pts) ===
-  // Colored boxes: 0-12 pts (2pt per box, max 12)
-  score += Math.min(m.coloredBoxCount * 2, 12);
-  // TikZ diagrams: 0-8 pts (4pt per diagram, max 8)
-  score += Math.min(m.tikzDiagramCount * 4, 8);
-  // Tables: 0-6 pts (2pt per table, max 6)
-  score += Math.min(m.tableCount * 2, 6);
-  // Icons: 0-4 pts (0.5pt per icon, max 4)
-  score += Math.min(Math.floor(m.iconCount * 0.5), 4);
+  // === VISUAL (max 35) ===
+  let visual = 0;
+  visual += Math.min(m.coloredBoxCount * 2, 12);   // 2pt per box, max 12
+  visual += Math.min(m.tikzDiagramCount * 4, 8);    // 4pt per diagram, max 8
+  visual += Math.min(m.tableCount * 2, 6);           // 2pt per table, max 6
+  visual += Math.min(Math.floor(m.iconCount * 0.5), 4); // 0.5pt per icon, max 4
+  visual += Math.min(m.rowColorCount, 3);            // 1pt per rowcolor, max 3
+  visual += Math.min(Object.keys(m.coloredBoxTypes).length, 2); // box diversity, max 2
+  const visualMax = 35;
 
-  // === CONTENT DEPTH (max 20 pts) ===
-  // Page count: 0-12 pts (2pt per page, max at 6 pages)
-  score += Math.min(m.estimatedPages * 2, 12);
-  // Diverse box types: 0-4 pts (1pt per unique type, max 4)
-  score += Math.min(Object.keys(m.coloredBoxTypes).length, 4);
-  // Row coloring in tables: 0-4 pts
-  score += Math.min(m.rowColorCount, 4);
+  // === CONTENT (max 25) ===
+  let content = 0;
+  // Pages: 2.5pt per page up to 6 pages = max 15
+  content += Math.min(Math.round(m.estimatedPages * 2.5), 15);
+  // Content density: ratio of content lines to total lines
+  const density = m.totalLines > 0 ? m.contentLines / m.totalLines : 0;
+  content += density >= 0.6 ? 5 : density >= 0.4 ? 3 : 1;
+  // Narrative richness: enough content lines for the page count
+  const linesPerPage = m.estimatedPages > 0 ? m.contentLines / m.estimatedPages : 0;
+  content += linesPerPage >= 35 ? 5 : linesPerPage >= 25 ? 3 : linesPerPage >= 15 ? 1 : 0;
+  const contentMax = 25;
 
-  // === PENALTIES (negative) ===
-  // Text deserts: -3 per desert
-  score -= m.textDeserts.length * 3;
-  // Empty subsections: -2 each
-  score -= m.emptySubsections.length * 2;
-  // Too short document: -5 if under 3 pages
-  if (m.estimatedPages < 3) score -= 5;
+  // === POLISH (max 15) ===
+  let polish = 0;
+  // No text deserts: 6pts if zero deserts
+  if (m.textDeserts.length === 0) polish += 6;
+  // No empty subsections: 4pts if zero
+  if (m.emptySubsections.length === 0) polish += 4;
+  // Icons in section headers (proxy: icons > sections means most sections have icons)
+  if (m.iconCount >= m.sectionCount && m.sectionCount > 0) polish += 3;
+  // Has lists (itemize/enumerate tend to indicate structured content — counted via contentLines)
+  // Simple proxy: coloredBoxCount > sectionCount means visual density is good
+  if (m.coloredBoxCount >= m.sectionCount) polish += 2;
+  const polishMax = 15;
 
-  return Math.max(0, Math.min(100, score));
+  // === PENALTIES ===
+  let penalties = 0;
+  penalties += m.textDeserts.length * 4;
+  penalties += m.emptySubsections.length * 3;
+  if (m.estimatedPages < 3) penalties += 5;
+
+  const raw = structure + visual + content + polish - penalties;
+  const score = Math.max(0, Math.min(100, raw));
+
+  return {
+    score,
+    breakdown: {
+      structure: { earned: structure, max: structureMax },
+      visual: { earned: visual, max: visualMax },
+      content: { earned: content, max: contentMax },
+      polish: { earned: polish, max: polishMax },
+      penalties,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Text desert detection
 // ---------------------------------------------------------------------------
 
-const VISUAL_PATTERNS = [
-  /\\begin\{(?:tikzpicture|tabularx?|longtable|itemize|enumerate|description)\}/,
-  /\\begin\{(?:infobox|alertbox|successbox|datacard|atividadebox|dicabox|materialbox|sessaobox|warnbox|tealbox|purplebox|goldbox)\}/,
-  /\\end\{(?:infobox|alertbox|successbox|datacard|atividadebox|dicabox|materialbox|sessaobox|warnbox|tealbox|purplebox|goldbox)\}/,
-  /\\faIcon\{/,
-  /\\includegraphics/,
-  /\\rowcolor/,
-  /\\section\s*[\[{]/,
-  /\\subsection\s*[\[{]/,
-];
-
-function isVisualLine(line: string): boolean {
-  const trimmed = line.trim();
-  if (trimmed === "" || trimmed.startsWith("%")) return true; // blank/comment = break
-  return VISUAL_PATTERNS.some((p) => p.test(trimmed));
-}
-
 function findTextDeserts(lines: string[]): QualityMetrics["textDeserts"] {
   const deserts: QualityMetrics["textDeserts"] = [];
-  const THRESHOLD = 25; // consecutive text-only lines
+  const THRESHOLD = 25;
 
   let desertStart = -1;
   let consecutive = 0;
@@ -273,7 +331,7 @@ function findTextDeserts(lines: string[]): QualityMetrics["textDeserts"] {
     if (isVisualLine(lines[i])) {
       if (consecutive >= THRESHOLD) {
         deserts.push({
-          startLine: desertStart + 1, // 1-indexed
+          startLine: desertStart + 1,
           endLine: i,
           lineCount: consecutive,
         });
@@ -286,7 +344,6 @@ function findTextDeserts(lines: string[]): QualityMetrics["textDeserts"] {
     }
   }
 
-  // Trailing desert
   if (consecutive >= THRESHOLD) {
     deserts.push({
       startLine: desertStart + 1,
@@ -310,7 +367,6 @@ function findEmptySubsections(lines: string[]): string[] {
     const match = lines[i].match(sectionRe);
     if (!match) continue;
 
-    // Check if next non-blank line is another section/subsection
     let j = i + 1;
     while (j < lines.length && lines[j].trim() === "") j++;
 
@@ -329,7 +385,7 @@ function findEmptySubsections(lines: string[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Format quality report
+// Format quality report — with SCORE BREAKDOWN (feedforward)
 // ---------------------------------------------------------------------------
 
 export function formatQualityReport(
@@ -338,10 +394,18 @@ export function formatQualityReport(
 ): string {
   const target = mode === "promax" ? 80 : 60;
   const isPass = metrics.score >= target;
+  const b = metrics.scoreBreakdown;
 
   const lines: string[] = [];
   lines.push(
     `QUALITY: ${metrics.score}/100 (${metrics.grade}) ${isPass ? "PASS" : "NEEDS IMPROVEMENT"}`
+  );
+  lines.push("");
+
+  // Score breakdown — the agent sees exactly where to gain points
+  lines.push("SCORE BREAKDOWN:");
+  lines.push(
+    `  Structure: ${b.structure.earned}/${b.structure.max}  Visual: ${b.visual.earned}/${b.visual.max}  Content: ${b.content.earned}/${b.content.max}  Polish: ${b.polish.earned}/${b.polish.max}${b.penalties > 0 ? `  Penalties: -${b.penalties}` : ""}`
   );
   lines.push("");
 
@@ -379,6 +443,9 @@ export function formatQualityReport(
     `  ${metrics.tableCount >= 2 ? "[OK]" : "[WARN]"} ${metrics.tableCount} tables`
   );
   lines.push(`  ${metrics.iconCount} FontAwesome icons`);
+  if (metrics.rowColorCount > 0) {
+    lines.push(`  ${metrics.rowColorCount} \\rowcolor uses`);
+  }
   lines.push("");
 
   // Content
@@ -402,22 +469,22 @@ export function formatQualityReport(
   }
   lines.push("");
 
-  // Priority fixes
+  // Priority fixes with point values
   const fixes = generateFixes(metrics, mode);
   if (fixes.length > 0) {
     lines.push("PRIORITY FIXES:");
     for (const fix of fixes) {
-      lines.push(`  ${fix.priority}. [${fix.category}] ${fix.message}`);
+      lines.push(`  ${fix.priority}. [${fix.category}] ${fix.message} (+${fix.points}pt)`);
     }
   } else {
-    lines.push("No critical fixes needed.");
+    lines.push("No critical fixes needed. Score target met.");
   }
 
   return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
-// Generate priority fixes
+// Generate priority fixes — with point values for each fix
 // ---------------------------------------------------------------------------
 
 function generateFixes(m: QualityMetrics, mode: string): QualityFix[] {
@@ -436,7 +503,8 @@ function generateFixes(m: QualityMetrics, mode: string): QualityFix[] {
       priority: p++,
       category: "STRUCTURE",
       message:
-        "Add a TikZ cover page with \\fill[aeeblue] overlay, title, student datacard",
+        "Add TikZ cover page: \\begin{tikzpicture}[remember picture,overlay] with \\fill and student datacard",
+      points: 6,
     });
   }
 
@@ -445,6 +513,7 @@ function generateFixes(m: QualityMetrics, mode: string): QualityFix[] {
       priority: p++,
       category: "STRUCTURE",
       message: "Add \\tableofcontents + \\newpage after cover",
+      points: 4,
     });
   }
 
@@ -453,31 +522,37 @@ function generateFixes(m: QualityMetrics, mode: string): QualityFix[] {
       priority: p++,
       category: "VISUAL",
       message: `Break text desert at lines ${desert.startLine}-${desert.endLine} with infobox, alertbox, or table`,
-      location: `lines ${desert.startLine}-${desert.endLine}`,
+      points: 4,
     });
   }
 
   if (m.tikzDiagramCount < minTikz) {
+    const needed = minTikz - m.tikzDiagramCount;
     fixes.push({
       priority: p++,
       category: "VISUAL",
-      message: `Add ${minTikz - m.tikzDiagramCount} more TikZ diagram(s) (radar chart, mind map, or timeline)`,
+      message: `Add ${needed} TikZ diagram(s): radar chart, mind map, or timeline`,
+      points: needed * 4,
     });
   }
 
   if (m.coloredBoxCount < minBoxes) {
+    const needed = minBoxes - m.coloredBoxCount;
     fixes.push({
       priority: p++,
       category: "VISUAL",
-      message: `Add ${minBoxes - m.coloredBoxCount} more colored box(es) (infobox, alertbox, successbox, dicabox)`,
+      message: `Add ${needed} colored box(es) — use infobox, alertbox, successbox, dicabox (not raw tcolorbox)`,
+      points: Math.min(needed * 2, 12 - m.coloredBoxCount * 2),
     });
   }
 
   if (m.tableCount < minTables) {
+    const needed = minTables - m.tableCount;
     fixes.push({
       priority: p++,
       category: "VISUAL",
-      message: `Add ${minTables - m.tableCount} more table(s) with \\rowcolor for readability`,
+      message: `Add ${needed} table(s) with tabularx and \\rowcolor alternating`,
+      points: Math.min(needed * 2, 6 - m.tableCount * 2),
     });
   }
 
@@ -485,7 +560,8 @@ function generateFixes(m: QualityMetrics, mode: string): QualityFix[] {
     fixes.push({
       priority: p++,
       category: "CONTENT",
-      message: `Document has only ${m.sectionCount} sections; aim for ${minSections}+`,
+      message: `Document has ${m.sectionCount} sections; add ${minSections - m.sectionCount} more to reach ${minSections}`,
+      points: Math.min(minSections - m.sectionCount, 8 - m.sectionCount),
     });
   }
 
@@ -493,7 +569,8 @@ function generateFixes(m: QualityMetrics, mode: string): QualityFix[] {
     fixes.push({
       priority: p++,
       category: "CONTENT",
-      message: `Document is ~${m.estimatedPages} pages; aim for ${minPages}+. Expand sections with detail.`,
+      message: `Document is ~${m.estimatedPages} pages; expand to ${minPages}+. Add detail, examples, strategies.`,
+      points: Math.min((minPages - m.estimatedPages) * 2, 15 - Math.round(m.estimatedPages * 2.5)),
     });
   }
 
@@ -502,7 +579,8 @@ function generateFixes(m: QualityMetrics, mode: string): QualityFix[] {
       priority: p++,
       category: "STRUCTURE",
       message:
-        "Add signature block at end (\\rule + name/date lines for teacher and coordinator)",
+        "Add signature block: \\rule{6cm}{0.4pt} with name fields for AEE teacher and coordinator",
+      points: 3,
     });
   }
 
@@ -510,7 +588,26 @@ function generateFixes(m: QualityMetrics, mode: string): QualityFix[] {
     fixes.push({
       priority: p++,
       category: "CONTENT",
-      message: `Subsection "${sub}" is empty — add content or remove it`,
+      message: `Subsection "${sub}" is empty — add content or remove`,
+      points: 3,
+    });
+  }
+
+  if (m.rowColorCount === 0 && m.tableCount > 0) {
+    fixes.push({
+      priority: p++,
+      category: "POLISH",
+      message: "Add \\rowcolor{aeelightblue} alternating to tables for readability",
+      points: 3,
+    });
+  }
+
+  if (Object.keys(m.coloredBoxTypes).length < 2 && m.coloredBoxCount > 0) {
+    fixes.push({
+      priority: p++,
+      category: "POLISH",
+      message: "Use more box variety — mix infobox, alertbox, successbox, dicabox, tealbox",
+      points: 2,
     });
   }
 

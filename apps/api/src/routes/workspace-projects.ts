@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import {
   workspaceProjects,
   workspaceFiles,
@@ -34,7 +34,28 @@ workspaceProjectRoutes.get("/", async (c) => {
     .where(and(...conditions))
     .orderBy(workspaceProjects.updatedAt);
 
-  return c.json({ success: true, data: projects });
+  // Count PDF files per project in a single query
+  const pdfCounts = await db
+    .select({
+      projectId: workspaceFiles.projectId,
+      count: sql<number>`count(*)`.as("count"),
+    })
+    .from(workspaceFiles)
+    .where(
+      and(
+        eq(workspaceFiles.userId, userId),
+        eq(workspaceFiles.mimeType, "application/pdf")
+      )
+    )
+    .groupBy(workspaceFiles.projectId);
+
+  const pdfMap = new Map(pdfCounts.map((r) => [r.projectId, r.count]));
+  const data = projects.map((p) => ({
+    ...p,
+    pdfCount: pdfMap.get(p.id) ?? 0,
+  }));
+
+  return c.json({ success: true, data });
 });
 
 // ---------- GET /:id — get project ----------

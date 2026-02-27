@@ -20,6 +20,7 @@ import {
   Heart,
   Presentation,
   FileStack,
+  FileCheck,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -155,6 +156,7 @@ const TEMPLATES: Template[] = [
 
 interface ProjectWithMeta extends WorkspaceProject {
   fileCount?: number;
+  pdfCount?: number;
   studentName?: string;
 }
 
@@ -389,11 +391,17 @@ export function EstudioPage() {
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-2 mt-3">
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
                       {project.studentId && (
                         <Badge variant="secondary" className="text-xs">
                           <User className="h-3 w-3 mr-1" />
                           {project.studentName || "Aluno vinculado"}
+                        </Badge>
+                      )}
+                      {(project.pdfCount ?? 0) > 0 && (
+                        <Badge className="text-xs bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/15">
+                          <FileCheck className="h-3 w-3 mr-1" />
+                          {project.pdfCount} PDF{project.pdfCount! > 1 ? "s" : ""}
                         </Badge>
                       )}
                     </div>

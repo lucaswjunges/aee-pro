@@ -2,10 +2,11 @@
  * Quality Analyzer for LaTeX documents (JS version for Agent Service).
  * Mirror of apps/api/src/lib/latex/quality-analyzer.ts
  *
- * Purely computational analysis (zero token cost).
+ * Recalibrated scorer:
+ *   Structure(25) + Visual(35) + Content(25) + Polish(15) = 100
+ *   Score breakdown (feedforward) enables predictive correction by the agent.
  */
 
-// Known tcolorbox environments from preamble
 const TCOLORBOX_ENVS = [
   "infobox", "alertbox", "successbox", "datacard", "atividadebox",
   "dicabox", "materialbox", "sessaobox", "warnbox", "tealbox",
@@ -16,18 +17,29 @@ const VISUAL_PATTERNS = [
   /\\begin\{(?:tikzpicture|tabularx?|longtable|itemize|enumerate|description)\}/,
   /\\begin\{(?:infobox|alertbox|successbox|datacard|atividadebox|dicabox|materialbox|sessaobox|warnbox|tealbox|purplebox|goldbox)\}/,
   /\\end\{(?:infobox|alertbox|successbox|datacard|atividadebox|dicabox|materialbox|sessaobox|warnbox|tealbox|purplebox|goldbox)\}/,
+  /\\begin\{tcolorbox\}/,
+  /\\end\{tcolorbox\}/,
   /\\faIcon\{/,
   /\\includegraphics/,
   /\\rowcolor/,
   /\\section\s*[\[{]/,
   /\\subsection\s*[\[{]/,
+  /\\field\{/,
+  /\\objtag/,
+  /\\starmark/,
+  /\\cmark/,
 ];
+
+function isVisualLine(line) {
+  const trimmed = line.trim();
+  if (trimmed === "" || trimmed.startsWith("%")) return true;
+  return VISUAL_PATTERNS.some((p) => p.test(trimmed));
+}
 
 export function analyzeLatexStructure(source) {
   const lines = source.split("\n");
   const totalLines = lines.length;
 
-  // Structure
   const sectionCount = (source.match(/\\section\s*[\[{]/g) || []).length;
   const subsectionCount = (source.match(/\\subsection\s*[\[{]/g) || []).length;
 
@@ -42,7 +54,6 @@ export function analyzeLatexStructure(source) {
     /assinatura|\\vfill.*?\\rule/is.test(source) ||
     /Local.*?Data|Data:.*?____/i.test(source);
 
-  // Visual elements
   const coloredBoxTypes = {};
   let coloredBoxCount = 0;
   for (const env of TCOLORBOX_ENVS) {
@@ -53,7 +64,6 @@ export function analyzeLatexStructure(source) {
       coloredBoxCount += matches.length;
     }
   }
-  // Also count raw \begin{tcolorbox} (agents sometimes use this directly)
   const rawTcolorboxCount = (source.match(/\\begin\{tcolorbox\}/g) || []).length;
   if (rawTcolorboxCount > 0) {
     coloredBoxTypes["tcolorbox"] = rawTcolorboxCount;
@@ -67,7 +77,6 @@ export function analyzeLatexStructure(source) {
   const rowColorCount = (source.match(/\\rowcolor/g) || []).length;
   const iconCount = (source.match(/\\faIcon\{/g) || []).length;
 
-  // Content
   const contentLines = lines.filter(
     (l) => l.trim() !== "" && !l.trim().startsWith("%")
   ).length;
@@ -78,57 +87,80 @@ export function analyzeLatexStructure(source) {
   const textDeserts = findTextDeserts(lines);
   const emptySubsections = findEmptySubsections(lines);
 
-  // Score
-  const metrics = {
+  const { score, breakdown } = computeScore({
     estimatedPages, sectionCount, subsectionCount,
     hasCoverPage, hasTableOfContents, hasSignatureBlock,
     coloredBoxCount, coloredBoxTypes, tikzDiagramCount,
     tableCount, rowColorCount, iconCount,
     totalLines, contentLines, textDeserts, emptySubsections,
-    score: 0, grade: "F",
+  });
+
+  const grade =
+    score >= 90 ? "A" : score >= 80 ? "B" :
+    score >= 65 ? "C" : score >= 50 ? "D" : "F";
+
+  return {
+    estimatedPages, sectionCount, subsectionCount,
+    hasCoverPage, hasTableOfContents, hasSignatureBlock,
+    coloredBoxCount, coloredBoxTypes, tikzDiagramCount,
+    tableCount, rowColorCount, iconCount,
+    totalLines, contentLines, textDeserts, emptySubsections,
+    score, grade, scoreBreakdown: breakdown,
   };
-
-  metrics.score = computeScore(metrics);
-  metrics.grade =
-    metrics.score >= 90 ? "A" : metrics.score >= 80 ? "B" :
-    metrics.score >= 65 ? "C" : metrics.score >= 50 ? "D" : "F";
-
-  return metrics;
 }
 
 function computeScore(m) {
-  let score = 0;
+  // Structure (max 25)
+  let structure = 0;
+  if (m.hasCoverPage) structure += 6;
+  if (m.hasTableOfContents) structure += 4;
+  if (m.hasSignatureBlock) structure += 3;
+  structure += Math.min(m.sectionCount, 8);
+  structure += Math.min(Math.floor(m.subsectionCount / 2), 4);
 
-  // Structure (max 30)
-  if (m.hasCoverPage) score += 8;
-  if (m.hasTableOfContents) score += 5;
-  if (m.hasSignatureBlock) score += 4;
-  score += Math.min(m.sectionCount, 8);
-  score += Math.min(Math.floor(m.subsectionCount / 2), 5);
+  // Visual (max 35)
+  let visual = 0;
+  visual += Math.min(m.coloredBoxCount * 2, 12);
+  visual += Math.min(m.tikzDiagramCount * 4, 8);
+  visual += Math.min(m.tableCount * 2, 6);
+  visual += Math.min(Math.floor(m.iconCount * 0.5), 4);
+  visual += Math.min(m.rowColorCount, 3);
+  visual += Math.min(Object.keys(m.coloredBoxTypes).length, 2);
 
-  // Visual density (max 30)
-  score += Math.min(m.coloredBoxCount * 2, 12);
-  score += Math.min(m.tikzDiagramCount * 4, 8);
-  score += Math.min(m.tableCount * 2, 6);
-  score += Math.min(Math.floor(m.iconCount * 0.5), 4);
+  // Content (max 25)
+  let content = 0;
+  content += Math.min(Math.round(m.estimatedPages * 2.5), 15);
+  const density = m.totalLines > 0 ? m.contentLines / m.totalLines : 0;
+  content += density >= 0.6 ? 5 : density >= 0.4 ? 3 : 1;
+  const linesPerPage = m.estimatedPages > 0 ? m.contentLines / m.estimatedPages : 0;
+  content += linesPerPage >= 35 ? 5 : linesPerPage >= 25 ? 3 : linesPerPage >= 15 ? 1 : 0;
 
-  // Content depth (max 20)
-  score += Math.min(m.estimatedPages * 2, 12);
-  score += Math.min(Object.keys(m.coloredBoxTypes).length, 4);
-  score += Math.min(m.rowColorCount, 4);
+  // Polish (max 15)
+  let polish = 0;
+  if (m.textDeserts.length === 0) polish += 6;
+  if (m.emptySubsections.length === 0) polish += 4;
+  if (m.iconCount >= m.sectionCount && m.sectionCount > 0) polish += 3;
+  if (m.coloredBoxCount >= m.sectionCount) polish += 2;
 
   // Penalties
-  score -= m.textDeserts.length * 3;
-  score -= m.emptySubsections.length * 2;
-  if (m.estimatedPages < 3) score -= 5;
+  let penalties = 0;
+  penalties += m.textDeserts.length * 4;
+  penalties += m.emptySubsections.length * 3;
+  if (m.estimatedPages < 3) penalties += 5;
 
-  return Math.max(0, Math.min(100, score));
-}
+  const raw = structure + visual + content + polish - penalties;
+  const score = Math.max(0, Math.min(100, raw));
 
-function isVisualLine(line) {
-  const trimmed = line.trim();
-  if (trimmed === "" || trimmed.startsWith("%")) return true;
-  return VISUAL_PATTERNS.some((p) => p.test(trimmed));
+  return {
+    score,
+    breakdown: {
+      structure: { earned: structure, max: 25 },
+      visual: { earned: visual, max: 35 },
+      content: { earned: content, max: 25 },
+      polish: { earned: polish, max: 15 },
+      penalties,
+    },
+  };
 }
 
 function findTextDeserts(lines) {
@@ -182,9 +214,15 @@ function findEmptySubsections(lines) {
 export function formatQualityReport(metrics, mode = "standard") {
   const target = mode === "promax" ? 80 : 60;
   const isPass = metrics.score >= target;
+  const b = metrics.scoreBreakdown;
 
   const lines = [];
   lines.push(`QUALITY: ${metrics.score}/100 (${metrics.grade}) ${isPass ? "PASS" : "NEEDS IMPROVEMENT"}`);
+  lines.push("");
+
+  // Score breakdown — feedforward for the agent
+  lines.push("SCORE BREAKDOWN:");
+  lines.push(`  Structure: ${b.structure.earned}/${b.structure.max}  Visual: ${b.visual.earned}/${b.visual.max}  Content: ${b.content.earned}/${b.content.max}  Polish: ${b.polish.earned}/${b.polish.max}${b.penalties > 0 ? `  Penalties: -${b.penalties}` : ""}`);
   lines.push("");
 
   lines.push("STRUCTURE:");
@@ -201,6 +239,9 @@ export function formatQualityReport(metrics, mode = "standard") {
   lines.push(`  ${metrics.tikzDiagramCount >= 2 ? "[OK]" : "[WARN]"} ${metrics.tikzDiagramCount} TikZ diagrams`);
   lines.push(`  ${metrics.tableCount >= 2 ? "[OK]" : "[WARN]"} ${metrics.tableCount} tables`);
   lines.push(`  ${metrics.iconCount} FontAwesome icons`);
+  if (metrics.rowColorCount > 0) {
+    lines.push(`  ${metrics.rowColorCount} \\rowcolor uses`);
+  }
   lines.push("");
 
   lines.push("CONTENT:");
@@ -217,15 +258,14 @@ export function formatQualityReport(metrics, mode = "standard") {
   }
   lines.push("");
 
-  // Priority fixes
   const fixes = generateFixes(metrics, mode);
   if (fixes.length > 0) {
     lines.push("PRIORITY FIXES:");
     for (const fix of fixes) {
-      lines.push(`  ${fix.priority}. [${fix.category}] ${fix.message}`);
+      lines.push(`  ${fix.priority}. [${fix.category}] ${fix.message} (+${fix.points}pt)`);
     }
   } else {
-    lines.push("No critical fixes needed.");
+    lines.push("No critical fixes needed. Score target met.");
   }
 
   return lines.join("\n");
@@ -242,34 +282,43 @@ function generateFixes(m, mode) {
   const minSections = isProMax ? 6 : 4;
 
   if (!m.hasCoverPage) {
-    fixes.push({ priority: p++, category: "STRUCTURE", message: "Add TikZ cover page with \\fill[aeeblue] overlay, title, student datacard" });
+    fixes.push({ priority: p++, category: "STRUCTURE", message: "Add TikZ cover page: \\begin{tikzpicture}[remember picture,overlay] with \\fill and student datacard", points: 6 });
   }
   if (!m.hasTableOfContents) {
-    fixes.push({ priority: p++, category: "STRUCTURE", message: "Add \\tableofcontents + \\newpage after cover" });
+    fixes.push({ priority: p++, category: "STRUCTURE", message: "Add \\tableofcontents + \\newpage after cover", points: 4 });
   }
   for (const desert of m.textDeserts) {
-    fixes.push({ priority: p++, category: "VISUAL", message: `Break text desert at lines ${desert.startLine}-${desert.endLine} with infobox, alertbox, or table` });
+    fixes.push({ priority: p++, category: "VISUAL", message: `Break text desert at lines ${desert.startLine}-${desert.endLine} with infobox, alertbox, or table`, points: 4 });
   }
   if (m.tikzDiagramCount < minTikz) {
-    fixes.push({ priority: p++, category: "VISUAL", message: `Add ${minTikz - m.tikzDiagramCount} more TikZ diagram(s) (radar chart, mind map, or timeline)` });
+    const needed = minTikz - m.tikzDiagramCount;
+    fixes.push({ priority: p++, category: "VISUAL", message: `Add ${needed} TikZ diagram(s): radar chart, mind map, or timeline`, points: needed * 4 });
   }
   if (m.coloredBoxCount < minBoxes) {
-    fixes.push({ priority: p++, category: "VISUAL", message: `Add ${minBoxes - m.coloredBoxCount} more colored box(es) (infobox, alertbox, successbox, dicabox)` });
+    const needed = minBoxes - m.coloredBoxCount;
+    fixes.push({ priority: p++, category: "VISUAL", message: `Add ${needed} colored box(es) — use infobox, alertbox, successbox, dicabox (not raw tcolorbox)`, points: Math.min(needed * 2, 12 - m.coloredBoxCount * 2) });
   }
   if (m.tableCount < minTables) {
-    fixes.push({ priority: p++, category: "VISUAL", message: `Add ${minTables - m.tableCount} more table(s) with \\rowcolor for readability` });
+    const needed = minTables - m.tableCount;
+    fixes.push({ priority: p++, category: "VISUAL", message: `Add ${needed} table(s) with tabularx and \\rowcolor alternating`, points: Math.min(needed * 2, 6 - m.tableCount * 2) });
   }
   if (m.sectionCount < minSections) {
-    fixes.push({ priority: p++, category: "CONTENT", message: `Document has only ${m.sectionCount} sections; aim for ${minSections}+` });
+    fixes.push({ priority: p++, category: "CONTENT", message: `Document has ${m.sectionCount} sections; add ${minSections - m.sectionCount} more`, points: Math.min(minSections - m.sectionCount, 8 - m.sectionCount) });
   }
   if (m.estimatedPages < minPages) {
-    fixes.push({ priority: p++, category: "CONTENT", message: `Document is ~${m.estimatedPages} pages; aim for ${minPages}+. Expand sections.` });
+    fixes.push({ priority: p++, category: "CONTENT", message: `Document is ~${m.estimatedPages} pages; expand to ${minPages}+`, points: Math.min((minPages - m.estimatedPages) * 2, 15 - Math.round(m.estimatedPages * 2.5)) });
   }
   if (!m.hasSignatureBlock) {
-    fixes.push({ priority: p++, category: "STRUCTURE", message: "Add signature block at end (\\rule + name/date)" });
+    fixes.push({ priority: p++, category: "STRUCTURE", message: "Add signature block: \\rule{6cm}{0.4pt} with name fields", points: 3 });
   }
   for (const sub of m.emptySubsections) {
-    fixes.push({ priority: p++, category: "CONTENT", message: `Subsection "${sub}" is empty — add content or remove` });
+    fixes.push({ priority: p++, category: "CONTENT", message: `Subsection "${sub}" is empty — add content or remove`, points: 3 });
+  }
+  if (m.rowColorCount === 0 && m.tableCount > 0) {
+    fixes.push({ priority: p++, category: "POLISH", message: "Add \\rowcolor{aeelightblue} alternating to tables", points: 3 });
+  }
+  if (Object.keys(m.coloredBoxTypes).length < 2 && m.coloredBoxCount > 0) {
+    fixes.push({ priority: p++, category: "POLISH", message: "Use more box variety — mix infobox, alertbox, successbox, dicabox, tealbox", points: 2 });
   }
 
   return fixes;
