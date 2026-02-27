@@ -60,6 +60,11 @@ export function detectTruncation(source: string): string | null {
 export function sanitizeLatexSource(source: string): string {
   let result = source;
 
+  // Layer 0a: Remove \setlength{\parindent}{0...} and \usepackage{parskip} from body.
+  // AI models often zero out paragraph indentation. Our preamble sets 1.25cm — preserve it.
+  result = result.replace(/\\setlength\{\\parindent\}\{0[^}]*\}/g, "");
+  result = result.replace(/\\usepackage(\[[^\]]*\])?\{parskip\}/g, "");
+
   // Layer 0: Strip emoji and supplemental Unicode characters pdflatex cannot handle.
   // pdflatex only supports characters declared in utf8.def (Latin-1 + some extensions).
   // Emoji (U+1F000+) and Misc Symbols (U+2600–U+27BF) cause fatal

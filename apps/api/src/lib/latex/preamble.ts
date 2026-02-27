@@ -44,6 +44,7 @@ export function getLatexPreamble(options: PreambleOptions): string {
 \\usepackage{microtype}
 \\usepackage{setspace}
 \\onehalfspacing
+\\setlength{\\parindent}{1.25cm}
 
 % --- Overflow prevention ---
 \\tolerance=2000
@@ -175,7 +176,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   shadow={1mm}{-1mm}{0mm}{black!20},
   before skip=10pt, after skip=10pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{alertbox}[1][]{
@@ -189,7 +190,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   boxrule=0.8pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   before skip=10pt, after skip=10pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{successbox}[1][]{
@@ -203,7 +204,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   boxrule=0.8pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   before skip=10pt, after skip=10pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{datacard}[1][]{
@@ -217,7 +218,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   boxrule=0.5pt,
   left=10pt, right=10pt, top=8pt, bottom=8pt,
   before skip=8pt, after skip=8pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{atividadebox}[2][]{
@@ -234,7 +235,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   before skip=12pt, after skip=12pt,
   attach boxed title to top left={yshift=-2mm, xshift=5mm},
   boxed title style={rounded corners, colback=#1!60},
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{dicabox}[1][]{
@@ -248,7 +249,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   boxrule=0.5pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   before skip=8pt, after skip=8pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{materialbox}{
@@ -259,7 +260,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   boxrule=0.4pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   before skip=6pt, after skip=6pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{sessaobox}[1][]{
@@ -275,7 +276,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   shadow={1.5mm}{-1.5mm}{0mm}{black!10},
   before skip=14pt, after skip=14pt,
   toptitle=3pt, bottomtitle=3pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{warnbox}[1][]{
@@ -289,7 +290,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   boxrule=0.8pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   before skip=10pt, after skip=10pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{tealbox}[1][]{
@@ -303,7 +304,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   boxrule=0.8pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   before skip=10pt, after skip=10pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{purplebox}[1][]{
@@ -317,7 +318,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   boxrule=0.8pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   before skip=10pt, after skip=10pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcolorbox{goldbox}[1][]{
@@ -331,7 +332,7 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
   boxrule=0.8pt,
   left=8pt, right=8pt, top=6pt, bottom=6pt,
   before skip=10pt, after skip=10pt,
-  before upper app={\\tolerance=9999\\emergencystretch=3em}
+  before upper app={\\setlength{\\parindent}{1.25cm}\\tolerance=9999\\emergencystretch=3em}
 }
 
 \\newtcbox{\\objtag}[1][aeeblue]{
