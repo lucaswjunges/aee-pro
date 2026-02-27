@@ -80,10 +80,10 @@ export function analyzeLatexStructure(source: string): QualityMetrics {
   const sectionCount = sectionMatches.length;
   const subsectionCount = subsectionMatches.length;
 
-  // Cover page: TikZ with fill covering page top area
+  // Cover page: TikZ with fill covering page top area (any color, not just aeeblue)
   const hasCoverPage =
     /\\begin\{tikzpicture\}.*?remember picture.*?overlay/s.test(source) &&
-    /\\fill\[.*?aeeblue.*?\].*?current page/s.test(source);
+    /\\fill\[.*?\].*?current page/s.test(source);
 
   // Table of contents
   const hasTableOfContents = /\\tableofcontents/.test(source);
@@ -104,6 +104,12 @@ export function analyzeLatexStructure(source: string): QualityMetrics {
       coloredBoxTypes[env] = matches.length;
       coloredBoxCount += matches.length;
     }
+  }
+  // Also count raw \begin{tcolorbox} (agents sometimes use this directly)
+  const rawTcolorboxCount = (source.match(/\\begin\{tcolorbox\}/g) || []).length;
+  if (rawTcolorboxCount > 0) {
+    coloredBoxTypes["tcolorbox"] = rawTcolorboxCount;
+    coloredBoxCount += rawTcolorboxCount;
   }
 
   // TikZ diagrams (excluding cover page overlay)

@@ -82,10 +82,8 @@ export async function runAgent(opts) {
       "\n--- Fim do histórico ---\n";
   }
 
-  // Adapt tool names: the Worker system prompt references custom tools (write_file, read_file, etc.)
-  // but the Agent SDK uses built-in tools (Write, Read, Edit, Bash, Glob, Grep) + MCP tools.
-  const adaptedPrompt = adaptToolNames(systemPrompt);
-  const fullSystemPrompt = adaptedPrompt + contextBlock;
+  // Worker now sends Agent SDK-specific prompt (buildAgentSDKSystemPrompt) with native tool names
+  const fullSystemPrompt = systemPrompt + contextBlock;
 
   // 4. Run the Agent SDK query
   const model = process.env.AGENT_MODEL || "claude-sonnet-4-6";

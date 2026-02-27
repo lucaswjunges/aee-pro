@@ -33,7 +33,7 @@ export function analyzeLatexStructure(source) {
 
   const hasCoverPage =
     /\\begin\{tikzpicture\}.*?remember picture.*?overlay/s.test(source) &&
-    /\\fill\[.*?aeeblue.*?\].*?current page/s.test(source);
+    /\\fill\[.*?\].*?current page/s.test(source);
 
   const hasTableOfContents = /\\tableofcontents/.test(source);
 
@@ -52,6 +52,12 @@ export function analyzeLatexStructure(source) {
       coloredBoxTypes[env] = matches.length;
       coloredBoxCount += matches.length;
     }
+  }
+  // Also count raw \begin{tcolorbox} (agents sometimes use this directly)
+  const rawTcolorboxCount = (source.match(/\\begin\{tcolorbox\}/g) || []).length;
+  if (rawTcolorboxCount > 0) {
+    coloredBoxTypes["tcolorbox"] = rawTcolorboxCount;
+    coloredBoxCount += rawTcolorboxCount;
   }
 
   const tikzBlocks = (source.match(/\\begin\{tikzpicture\}/g) || []).length;
