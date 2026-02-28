@@ -380,6 +380,7 @@ function fixLineBreakAfterSectioning(source) {
  * Fix common LaTeX syntax errors:
  * - \begin{atividadebox}[cor][titulo] → \begin{atividadebox}[cor]{titulo}
  * - \begin{atividadebox}{cor}{titulo} → \begin{atividadebox}[cor]{titulo}
+ * - \field{A}{B} & \field{C}{D} → \field{A}{B} \field{C}{D}  (inside 2-col tabularx)
  */
 function fixEnvironmentSyntax(source) {
   // atividadebox takes [optional-color]{mandatory-title}
@@ -393,6 +394,42 @@ function fixEnvironmentSyntax(source) {
     /\\begin\{atividadebox\}\{(aee\w+|[a-z]+)\}\{([^}]*)\}/g,
     "\\begin{atividadebox}[$1]{$2}"
   );
+
+  // Fix: \field{A}{B} & \field{C}{D} → remove the extra & between \field macros
+  // \field already contains & internally, so adding extra & breaks 2-column tabularx
+  result = result.replace(
+    /\\field\{([^}]*)\}\{([^}]*)\}\s*&\s*\\field\{/g,
+    "\\field{$1}{$2}\n\\field{"
+  );
+
+  // Fix common invalid FontAwesome 5 icon names
+  const iconFixes = {
+    "pill": "pills",
+    "scissors": "cut",
+    "volume-mute": "volume-off",
+    "map-signs": "map-marker-alt",
+    "hand-o-right": "hand-point-right",
+    "hand-o-left": "hand-point-left",
+    "hand-o-up": "hand-point-up",
+    "pencil": "pencil-alt",
+    "gear": "cog",
+    "gears": "cogs",
+    "warning": "exclamation-triangle",
+    "close": "times",
+    "remove": "times",
+    "ban-circle": "ban",
+    "file-text": "file-alt",
+    "bar-chart": "chart-bar",
+    "line-chart": "chart-line",
+    "pie-chart": "chart-pie",
+  };
+  for (const [wrong, correct] of Object.entries(iconFixes)) {
+    result = result.replace(
+      new RegExp(`\\\\faIcon\\{${wrong}\\}`, "g"),
+      `\\faIcon{${correct}}`
+    );
+  }
+
   return result;
 }
 

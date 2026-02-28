@@ -589,6 +589,24 @@ async function compileLatexFile(
       /\\begin\{atividadebox\}\{(aee\w+|[a-z]+)\}\{([^}]*)\}/g,
       "\\begin{atividadebox}[$1]{$2}"
     );
+    // Fix: \field{A}{B} & \field{C}{D} → remove extra & between \field macros
+    latexSource = latexSource.replace(
+      /\\field\{([^}]*)\}\{([^}]*)\}\s*&\s*\\field\{/g,
+      "\\field{$1}{$2}\n\\field{"
+    );
+    // Fix common invalid FontAwesome 5 icon names
+    const iconFixes: Record<string, string> = {
+      "pill": "pills", "scissors": "cut", "volume-mute": "volume-off",
+      "map-signs": "map-marker-alt", "pencil": "pencil-alt", "gear": "cog",
+      "gears": "cogs", "warning": "exclamation-triangle", "close": "times",
+      "bar-chart": "chart-bar", "line-chart": "chart-line", "pie-chart": "chart-pie",
+    };
+    for (const [wrong, correct] of Object.entries(iconFixes)) {
+      latexSource = latexSource.replace(
+        new RegExp(`\\\\faIcon\\{${wrong}\\}`, "g"),
+        `\\faIcon{${correct}}`
+      );
+    }
     // Fix \\ after sectioning commands — causes "There's no line here to end"
     latexSource = fixLineBreakAfterSectioning(latexSource);
     console.log("[compile_latex] step 4b: fixLineBreak done");

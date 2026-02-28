@@ -167,8 +167,17 @@ Boxes com título opcional: infobox[T], alertbox[T], successbox[T], warnbox[T], 
 datacard[T] — cartão cinza para dados | sessaobox[T] — sessão grande | dicabox — dica amarela
 \\begin{atividadebox}[cor]{Título} — atividade colorida (cor opcional em [], título obrigatório em {})
 materialbox — lista de materiais (sem argumentos)
-\\field{rótulo}{valor} — dentro de tabularx | \\fieldline{rótulo}{valor} — inline
-\\faIcon{nome} — ícone FontAwesome (brain, heartbeat, users, star, etc.)
+\\field{rótulo}{valor} — SOMENTE dentro de tabularx com 2 colunas (lX). Já contém & e \\\\ internamente.
+\\fieldline{rótulo}{valor} — inline (fora de tabelas)
+\\faIcon{nome} — ícone FontAwesome 5 Free. Ícones VÁLIDOS mais usados:
+  brain, heartbeat, users, star, book, pencil-alt, graduation-cap, child, home,
+  calendar-alt, clock, check, times, exclamation-triangle, info-circle,
+  arrow-up, arrow-down, arrows-alt-h, chart-bar, chart-line, chart-pie,
+  user, user-friends, comments, comment, envelope, phone, map-marker-alt,
+  caret-right, puzzle-piece, eye, hand-paper, lightbulb, trophy, thumbs-up,
+  palette, music, running, walking, wheelchair, stethoscope, pills, cut,
+  volume-up, volume-off, book-open, chalkboard-teacher, ribbon, lock, tasks, female, male
+  NÃO USE: pill (use pills), scissors (use cut), volume-mute (use volume-off), map-signs (use map-marker-alt)
 \\objtag[cor]{texto} — tag inline colorida
 Cores: aeeblue, aeegold, aeegreen, aeered, aeeorange, aeepurple, aeeteal, aeegray
 
@@ -191,7 +200,10 @@ BEAMER (apresentações):
 Se pedirem apresentação/slides, use \\documentclass{beamer} com preamble COMPLETO (\\usepackage, \\usetheme, etc.) — o sistema NÃO injeta preamble em Beamer. Apenas as cores AEE (aeeblue, aeegold, etc.) são adicionadas automaticamente. Estruture com \\begin{frame}{Título}...\\end{frame}. NUNCA recuse criar Beamer.
 
 REGRAS CRÍTICAS LaTeX:
-- Use tabularx com coluna X (NUNCA tabular com colunas fixas largas)
+- tabularx: SEMPRE {\\linewidth} (dentro de box) ou {\\textwidth}. Use coluna X para texto longo.
+  ATENÇÃO: \\field{}{} JÁ INCLUI & e \\\\. NÃO adicione & extra! Exemplo correto:
+  \\begin{tabularx}{\\linewidth}{lX} \\field{Nome}{João} \\field{Idade}{8} \\end{tabularx}
+  Para tabelas com 3+ colunas, use & manual SEM \\field: \\textbf{Col1} & Col2 & Col3 \\\\
 - \\rowcolor DEVE ser o PRIMEIRO comando da linha na tabela
 - NUNCA use \\\\ após \\section{} ou \\subsection{}
 - Dentro de tcolorbox: use \\linewidth (não \\textwidth)
