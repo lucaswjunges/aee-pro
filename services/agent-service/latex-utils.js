@@ -278,6 +278,79 @@ function injectProfessionalPreamble(source, fallbackTitle, fallbackStudent, fall
   return professionalPreamble + "\n" + body;
 }
 
+// ---------- Beamer detection ----------
+
+/**
+ * Check if a LaTeX source is a Beamer presentation.
+ */
+function isBeamerDocument(source) {
+  const idx = source.indexOf("\\begin{document}");
+  const preamble = source.substring(0, idx !== -1 ? idx : 500);
+  return /\\documentclass(\[[^\]]*\])?\{beamer\}/.test(preamble);
+}
+
+/**
+ * Inject AEE colors and essential packages into a Beamer preamble.
+ * Preserves the AI-generated Beamer structure (theme, frames, etc.)
+ * but adds our standard color palette so \color{aeeblue} etc. work.
+ */
+function injectBeamerColors(source) {
+  const beginDocIdx = source.indexOf("\\begin{document}");
+  if (beginDocIdx === -1) return source;
+
+  const preamble = source.substring(0, beginDocIdx);
+  const body = source.substring(beginDocIdx);
+
+  // Only inject colors if not already defined
+  let injections = "";
+
+  if (!preamble.includes("aeeblue")) {
+    injections += `
+% --- AEE+ Pro Colors ---
+\\definecolor{aeeblue}{HTML}{1E3A5F}
+\\definecolor{aeegold}{HTML}{C9A84C}
+\\definecolor{aeelightblue}{HTML}{E8F0FE}
+\\definecolor{aeegreen}{HTML}{2E7D32}
+\\definecolor{aeered}{HTML}{C62828}
+\\definecolor{aeeorange}{HTML}{E65100}
+\\definecolor{aeepurple}{HTML}{6A1B9A}
+\\definecolor{aeeteal}{HTML}{00695C}
+\\definecolor{aeegray}{HTML}{F5F5F5}
+\\definecolor{textgray}{HTML}{555555}
+\\definecolor{lightgreen}{HTML}{E8F5E9}
+\\definecolor{lightorange}{HTML}{FFF3E0}
+\\definecolor{lightpurple}{HTML}{F3E5F5}
+\\definecolor{lightteal}{HTML}{E0F2F1}
+\\definecolor{lightred}{HTML}{FFEBEE}
+\\definecolor{lightyellow}{HTML}{FFFDE7}
+`;
+  }
+
+  // Ensure fontawesome5 is loaded
+  if (!preamble.includes("fontawesome5")) {
+    injections += "\\usepackage{fontawesome5}\n";
+  }
+
+  // Ensure pifont is loaded (for \ding, \cmark)
+  if (!preamble.includes("pifont")) {
+    injections += "\\usepackage{pifont}\n";
+  }
+
+  // Ensure \cmark is defined
+  if (!preamble.includes("\\cmark") && !preamble.includes("\\newcommand{\\cmark}")) {
+    injections += "\\newcommand{\\cmark}{\\ding{51}}\n";
+  }
+
+  // Ensure graphicx is in draft mode (no external images)
+  if (!preamble.includes("[draft]{graphicx}") && !preamble.includes("graphicx")) {
+    injections += "\\usepackage[draft]{graphicx}\n";
+  }
+
+  if (!injections) return source;
+
+  return preamble + injections + "\n" + body;
+}
+
 // ---------- LaTeX fixers (ported from tool-executor.ts) ----------
 
 /**
@@ -430,6 +503,22 @@ function fixEnvironmentSyntax(source) {
     "bar-chart": "chart-bar",
     "line-chart": "chart-line",
     "pie-chart": "chart-pie",
+    "globe-americas": "globe",
+    "globe-africa": "globe",
+    "globe-asia": "globe",
+    "globe-europe": "globe",
+    "comments-alt": "comments",
+    "lightbulb-o": "lightbulb",
+    "heart-o": "heart",
+    "star-o": "star",
+    "bookmark-o": "bookmark",
+    "folder-o": "folder",
+    "file-o": "file",
+    "calendar-o": "calendar-alt",
+    "flag-o": "flag",
+    "bell-o": "bell",
+    "hourglass-o": "hourglass",
+    "clipboard": "clipboard-list",
   };
   for (const [wrong, correct] of Object.entries(iconFixes)) {
     result = result.replace(
@@ -512,9 +601,17 @@ export async function compileLatexLocal(relPath, workDir) {
 
   // Inject preamble if \begin{document} is present
   let compileSource = rawSource;
+  const isBeamer = isBeamerDocument(rawSource);
   if (rawSource.includes("\\begin{document}")) {
-    const fallbackTitle = relPath.replace(/\.tex$/, "").replace(/[-_]/g, " ");
-    compileSource = injectProfessionalPreamble(rawSource, fallbackTitle, "", "");
+    if (isBeamer) {
+      // Beamer: preserve AI preamble, just inject AEE colors + essential packages
+      compileSource = injectBeamerColors(rawSource);
+      console.log("[compileLatexLocal] Beamer detected — injected colors only");
+    } else {
+      // Standard documents: replace with professional AEE preamble
+      const fallbackTitle = relPath.replace(/\.tex$/, "").replace(/[-_]/g, " ");
+      compileSource = injectProfessionalPreamble(rawSource, fallbackTitle, "", "");
+    }
   }
 
   // Fix environment syntax errors (atividadebox [cor][T] → [cor]{T})

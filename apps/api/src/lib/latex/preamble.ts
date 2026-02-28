@@ -473,12 +473,12 @@ export function injectBeamerColors(source: string): string {
   const preamble = source.substring(0, beginDocIdx);
   const body = source.substring(beginDocIdx);
 
-  // Only inject if colors aren't already defined
-  if (preamble.includes("aeeblue")) return source;
+  let injections = "";
 
-  const colorDefs = `
+  // Inject AEE color palette if not already defined
+  if (!preamble.includes("aeeblue")) {
+    injections += `
 % --- AEE+ Pro Colors ---
-\\usepackage[dvipsnames,svgnames,x11names]{xcolor}
 \\definecolor{aeeblue}{HTML}{1E3A5F}
 \\definecolor{aeegold}{HTML}{C9A84C}
 \\definecolor{aeelightblue}{HTML}{E8F0FE}
@@ -496,8 +496,26 @@ export function injectBeamerColors(source: string): string {
 \\definecolor{lightred}{HTML}{FFEBEE}
 \\definecolor{lightyellow}{HTML}{FFFDE7}
 `;
+  }
 
-  return preamble + colorDefs + "\n" + body;
+  // Ensure fontawesome5 is loaded (icons in slides)
+  if (!preamble.includes("fontawesome5")) {
+    injections += "\\usepackage{fontawesome5}\n";
+  }
+
+  // Ensure pifont is loaded (for \ding, \cmark)
+  if (!preamble.includes("pifont")) {
+    injections += "\\usepackage{pifont}\n";
+  }
+
+  // Ensure \cmark is defined
+  if (!preamble.includes("\\cmark") && !preamble.includes("\\newcommand{\\cmark}")) {
+    injections += "\\newcommand{\\cmark}{\\ding{51}}\n";
+  }
+
+  if (!injections) return source;
+
+  return preamble + injections + "\n" + body;
 }
 
 function escapeLatex(text: string): string {

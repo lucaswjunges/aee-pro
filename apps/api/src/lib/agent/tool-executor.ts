@@ -579,6 +579,7 @@ async function compileLatexFile(
     ? sourceForSanitize.replace(/[\u2600-\u27BF\u{1F000}-\u{10FFFF}]/gu, "") // strip emoji only
     : sanitizeLatexSource(sourceForSanitize);
   console.log("[compile_latex] step 4a: sanitize done in", Date.now() - sanitizeStart, "ms");
+  // --- Article-only fixes (skip for Beamer — these patterns don't exist in slides) ---
   if (!isBeamer) {
     // Fix environment syntax: atividadebox[cor][T] → [cor]{T}
     latexSource = latexSource.replace(
@@ -599,49 +600,6 @@ async function compileLatexFile(
       /\\field\{([^}]*)\}\{([^}]*)\}\s*&\s*\\field\{/g,
       "\\field{$1}{$2}\n\\field{"
     );
-    // Fix common invalid FontAwesome 5 icon names
-    const iconFixes: Record<string, string> = {
-      "pill": "pills", "scissors": "cut", "volume-mute": "volume-off",
-      "map-signs": "map-marker-alt", "hand-o-right": "hand-point-right",
-      "hand-o-left": "hand-point-left", "hand-o-up": "hand-point-up",
-      "pencil": "pencil-alt", "gear": "cog", "gears": "cogs",
-      "warning": "exclamation-triangle", "close": "times", "remove": "times",
-      "ban-circle": "ban", "file-text": "file-alt",
-      "bar-chart": "chart-bar", "line-chart": "chart-line", "pie-chart": "chart-pie",
-    };
-    for (const [wrong, correct] of Object.entries(iconFixes)) {
-      latexSource = latexSource.replace(
-        new RegExp(`\\\\faIcon\\{${wrong}\\}`, "g"),
-        `\\faIcon{${correct}}`
-      );
-    }
-    // Fix deprecated \tikzstyle → \tikzset
-    latexSource = latexSource.replace(
-      /\\tikzstyle\{([^}]+)\}\s*=\s*\[([^\]]*)\]/g,
-      "\\tikzset{$1/.style={$2}}"
-    );
-    // Fix Unicode math symbols that break pdflatex (inputenc[utf8]+T1 handles basic typography)
-    const unicodeFixes: Record<string, string> = {
-      "\u00D7": "$\\times$",       // ×
-      "\u00F7": "$\\div$",         // ÷
-      "\u2265": "$\\geq$",         // ≥
-      "\u2264": "$\\leq$",         // ≤
-      "\u2260": "$\\neq$",         // ≠
-      "\u2192": "$\\rightarrow$",  // →
-      "\u2190": "$\\leftarrow$",   // ←
-      "\u2191": "$\\uparrow$",     // ↑
-      "\u2193": "$\\downarrow$",   // ↓
-      "\u221E": "$\\infty$",       // ∞
-      "\u221A": "$\\sqrt{}$",      // √
-      "\u2248": "$\\approx$",      // ≈
-      "\u2713": "\\cmark{}",       // ✓
-      "\u2717": "\\ding{55}",      // ✗
-    };
-    for (const [char, replacement] of Object.entries(unicodeFixes)) {
-      if (latexSource.includes(char)) {
-        latexSource = latexSource.split(char).join(replacement);
-      }
-    }
     // Fix \item directly inside tcolorbox (needs \begin{itemize} wrapper)
     const boxEnvs = "materialbox|infobox|alertbox|successbox|warnbox|tealbox|purplebox|goldbox|dicabox|sessaobox|datacard|atividadebox";
     latexSource = latexSource.replace(
@@ -652,10 +610,62 @@ async function compileLatexFile(
       new RegExp(`(\\\\item\\b[^\n]*)\n(\\s*\\\\end\\{(?:${boxEnvs})\\})`, "g"),
       "$1\n\\end{itemize}\n$2"
     );
-    // Fix \\ after sectioning commands — causes "There's no line here to end"
-    latexSource = fixLineBreakAfterSectioning(latexSource);
-    console.log("[compile_latex] step 4b: fixLineBreak done");
   }
+
+  // --- Universal fixes (apply to ALL documents including Beamer) ---
+  // Fix common invalid FontAwesome 5 icon names
+  const iconFixes: Record<string, string> = {
+    "pill": "pills", "scissors": "cut", "volume-mute": "volume-off",
+    "map-signs": "map-marker-alt", "hand-o-right": "hand-point-right",
+    "hand-o-left": "hand-point-left", "hand-o-up": "hand-point-up",
+    "pencil": "pencil-alt", "gear": "cog", "gears": "cogs",
+    "warning": "exclamation-triangle", "close": "times", "remove": "times",
+    "ban-circle": "ban", "file-text": "file-alt",
+    "bar-chart": "chart-bar", "line-chart": "chart-line", "pie-chart": "chart-pie",
+    "globe-americas": "globe", "globe-africa": "globe",
+    "globe-asia": "globe", "globe-europe": "globe",
+    "comments-alt": "comments", "lightbulb-o": "lightbulb",
+    "heart-o": "heart", "star-o": "star", "bookmark-o": "bookmark",
+    "folder-o": "folder", "file-o": "file", "calendar-o": "calendar-alt",
+    "flag-o": "flag", "bell-o": "bell", "hourglass-o": "hourglass",
+    "clipboard": "clipboard-list",
+  };
+  for (const [wrong, correct] of Object.entries(iconFixes)) {
+    latexSource = latexSource.replace(
+      new RegExp(`\\\\faIcon\\{${wrong}\\}`, "g"),
+      `\\faIcon{${correct}}`
+    );
+  }
+  // Fix deprecated \tikzstyle → \tikzset
+  latexSource = latexSource.replace(
+    /\\tikzstyle\{([^}]+)\}\s*=\s*\[([^\]]*)\]/g,
+    "\\tikzset{$1/.style={$2}}"
+  );
+  // Fix Unicode math symbols that break pdflatex (inputenc[utf8]+T1 handles basic typography)
+  const unicodeFixes: Record<string, string> = {
+    "\u00D7": "$\\times$",       // ×
+    "\u00F7": "$\\div$",         // ÷
+    "\u2265": "$\\geq$",         // ≥
+    "\u2264": "$\\leq$",         // ≤
+    "\u2260": "$\\neq$",         // ≠
+    "\u2192": "$\\rightarrow$",  // →
+    "\u2190": "$\\leftarrow$",   // ←
+    "\u2191": "$\\uparrow$",     // ↑
+    "\u2193": "$\\downarrow$",   // ↓
+    "\u221E": "$\\infty$",       // ∞
+    "\u221A": "$\\sqrt{}$",      // √
+    "\u2248": "$\\approx$",      // ≈
+    "\u2713": "\\cmark{}",       // ✓
+    "\u2717": "\\ding{55}",      // ✗
+  };
+  for (const [char, replacement] of Object.entries(unicodeFixes)) {
+    if (latexSource.includes(char)) {
+      latexSource = latexSource.split(char).join(replacement);
+    }
+  }
+  // Fix \\ after sectioning commands — causes "There's no line here to end"
+  latexSource = fixLineBreakAfterSectioning(latexSource);
+  console.log("[compile_latex] step 4b: auto-fixers done", isBeamer ? "(Beamer)" : "");
   await yieldEventLoop();
 
   // Collect all project files for compilation
