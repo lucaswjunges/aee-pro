@@ -285,7 +285,13 @@ workspaceFileRoutes.get("/files/:fileId", async (c) => {
 
   const headers = new Headers();
   headers.set("Content-Type", file.mimeType);
-  headers.set("Cache-Control", "private, max-age=3600");
+  // PDFs and outputs change frequently (recompilation) — don't cache
+  // Other files (images, tex) can be cached briefly
+  if (file.mimeType === "application/pdf" || file.isOutput) {
+    headers.set("Cache-Control", "no-cache, no-store, private");
+  } else {
+    headers.set("Cache-Control", "private, max-age=300");
+  }
 
   return new Response(object.body, { headers });
 });

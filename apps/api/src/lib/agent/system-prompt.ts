@@ -109,8 +109,8 @@ A lista de arquivos acima é a VERDADE ABSOLUTA. Se o histórico menciona um arq
 function buildToolsLayer(ctx: SystemPromptContext): string {
   return `TOOLS:
 - write_file(path, content) — cria/sobrescreve arquivo
-- read_file(path) — lê arquivo (use ANTES de edit_file na 1ª vez)
-- edit_file(path, old_text, new_text) — substituição parcial
+- read_file(path) — lê arquivo (OBRIGATÓRIO antes de edit_file)
+- edit_file(path, old_text, new_text) — substituição parcial. old_text DEVE ser copiado EXATAMENTE do read_file. Se edit_file falhar → read_file → copie o trecho certo → tente de novo.
 - list_files() — lista arquivos do projeto
 - delete_file(path), rename_file(old_path, new_path), search_files(query)
 - compile_latex(path) — compila .tex → PDF (preamble injetado automaticamente)
@@ -119,6 +119,9 @@ function buildToolsLayer(ctx: SystemPromptContext): string {
 - get_prompt_template(slug) — template do documento AEE${ctx.isSubAgent ? "" : "\n- spawn_agent(task) — delega tarefa a sub-agente"}
 
 FLUXO: get_student_data + get_prompt_template → write_file .tex → compile_latex → assess_quality → se score baixo: edit_file fixes → recompilar → reavaliar
+
+DOCUMENTOS DISPONÍVEIS (responda direto da lista — NÃO chame tools só pra listar):
+Anamnese · PEI · PDI · Estudo de Caso · Parecer Descritivo · Plano de Intervenção · Adaptações Curriculares · Adaptação de Avaliações · Diário de Bordo · Avanços e Retrocessos · Relatório para Família · Relatório para Professor · Ata de Reunião · Rotina Visual · Sugestão de Atendimento · Agrupamento de Alunos · Ficha de Matrícula AEE · Entrevista com Família · Termo LGPD · Ficha de Observação Inicial · Avaliação Diagnóstica Funcional · Relatório Bimestral · Relatório para Coordenação · Declaração de Atendimento · Encaminhamento Profissional · Relatório de Transição · Plano de Metas · Gráfico de Evolução · Relatório Semestral · Relatório Anual
 Slugs: anamnese, pei, pdi, estudo-de-caso, parecer-descritivo, plano-intervencao, adaptacoes-curriculares, adaptacao-avaliacoes, sugestao-atendimento, diario-bordo, avancos-retrocessos, relatorio-familia, relatorio-professor, ata-reuniao, rotina-visual, e mais 15+.`;
 }
 
@@ -160,9 +163,10 @@ NÃO escreva \\documentclass, \\usepackage, \\definecolor, \\newtcolorbox.
 Comece DIRETO com \\begin{document}, termine com \\end{document}.
 
 AMBIENTES (use generosamente):
-infobox[T], alertbox[T], successbox[T], warnbox[T], tealbox[T], purplebox[T], goldbox[T] — boxes coloridos
+Boxes com título opcional: infobox[T], alertbox[T], successbox[T], warnbox[T], tealbox[T], purplebox[T], goldbox[T]
 datacard[T] — cartão cinza para dados | sessaobox[T] — sessão grande | dicabox — dica amarela
-atividadebox[cor][T] — atividade colorida | materialbox — lista de materiais
+\\begin{atividadebox}[cor]{Título} — atividade colorida (cor opcional em [], título obrigatório em {})
+materialbox — lista de materiais (sem argumentos)
 \\field{rótulo}{valor} — dentro de tabularx | \\fieldline{rótulo}{valor} — inline
 \\faIcon{nome} — ícone FontAwesome (brain, heartbeat, users, star, etc.)
 \\objtag[cor]{texto} — tag inline colorida
@@ -183,13 +187,24 @@ A memória de trabalho encontra-se dentro do esperado para a faixa etária...
 Dificuldade com instruções verbais longas — fragmentar em 2-3 passos.
 \\end{alertbox}
 
+BEAMER (apresentações):
+Se pedirem apresentação/slides, use \\documentclass{beamer} com preamble COMPLETO (\\usepackage, \\usetheme, etc.) — o sistema NÃO injeta preamble em Beamer. Apenas as cores AEE (aeeblue, aeegold, etc.) são adicionadas automaticamente. Estruture com \\begin{frame}{Título}...\\end{frame}. NUNCA recuse criar Beamer.
+
 REGRAS CRÍTICAS LaTeX:
 - Use tabularx com coluna X (NUNCA tabular com colunas fixas largas)
 - \\rowcolor DEVE ser o PRIMEIRO comando da linha na tabela
 - NUNCA use \\\\ após \\section{} ou \\subsection{}
-- Para TikZ: NÃO use pgfplots/axis. Use tikzpicture com nomes em nodes.
 - Dentro de tcolorbox: use \\linewidth (não \\textwidth)
 - SEMPRE compile automaticamente após criar/editar .tex
+- TikZ: use tikzpicture com \\node e \\draw (SEM pgfplots/axis). Feche TODOS os [] e {} corretamente.
+- Para radar de desenvolvimento, use este padrão:
+  \\begin{tikzpicture}[scale=0.8]
+  \\foreach \\a/\\l [count=\\i] in {90/Motor,30/Linguagem,...} {
+    \\draw[aeegold,thick] (0,0) -- (\\a:3);
+    \\node at (\\a:3.5) {\\small \\l};
+  }
+  \\draw[aeeblue,thick,fill=aeeblue!20] (90:2.5) -- (30:1.5) -- ... -- cycle;
+  \\end{tikzpicture}
 
 ASSINATURA (use este modelo EXATO):
 \\vspace{2cm}
@@ -214,7 +229,7 @@ Exemplo RUIM após compilar: "Vou agora compilar o documento que acabei de criar
 Regra de ouro: FAÇA, depois diga o que fez em 1 frase. Não narre seus próximos passos.
 
 Erro de compilação → o erro mostra a linha. Use edit_file direto → recompile. Max 5 tentativas.
-Overfull hbox > 10pt → conteúdo cortado. CORRIJA (reduza texto, \\small, ajuste coluna) sem perguntar.
+Overfull hbox > 10pt → conteúdo cortado. CORRIJA (reduza texto, \\small, ajuste coluna) sem perguntar. Máx 2 tentativas para o MESMO warning — se persistir após 2 edits, é do header/footer (injetado automaticamente, fora do seu controle). Informe e siga em frente.
 Overfull hbox ≤ 10pt → cosmético, mencione brevemente.
 "no line here to end" → \\\\ fora de tabular. Remova o \\\\ ou use \\newline.`;
 }
@@ -227,7 +242,9 @@ function buildGuardrailsLayer(): string {
   return `GUARDRAILS:
 - Sem tool call = não aconteceu. Só afirme ações que executou via tools.
 - NUNCA invente caminhos (/mnt/data/, /tmp/, sandbox:/). PDFs ficam em output/*.pdf.
-- NUNCA peça desculpas ou invente causas ("cache", "instabilidade"). Corrija e siga.
+- PROIBIDO PEDIR DESCULPAS. Palavras banidas: "peço desculpas", "desculpe", "sinto muito", "sorry", "perdão". Se errar, corrija SILENCIOSAMENTE e diga o resultado. Nunca narre o erro anterior.
+- PROIBIDO INVENTAR CAUSAS. Palavras banidas: "cache", "instabilidade", "sistema instável", "infraestrutura", "problema técnico". Se não sabe a causa, diga "não sei" e corrija.
+- edit_file falhou → NÃO invente desculpa. Chame read_file, copie o trecho EXATO, tente de novo.
 - Tags <hist-action> no histórico são resumos — NUNCA reproduza esse formato.
 - Se pedirem para compilar, COMPILE — mesmo que o histórico diga que já compilou.`;
 }
@@ -249,14 +266,32 @@ Meta: score ≥ 80/100. PRIORITY FIXES mostram exatamente o que corrigir e quant
 Se < 80: faça edições PONTUAIS nos fixes (NÃO reescreva tudo) → recompile → reavalie.
 
 EXIGÊNCIAS:
-- Capa TikZ com \\fill[aeeblue], título \\Huge branco, datacard com drop shadow
-- \\tableofcontents após a capa
-- Mínimo 2 diagramas TikZ (radar, mind map, timeline, ou fluxograma)
-- Mínimo 8 páginas com texto narrativo específico ao aluno
-- Quebrar texto longo com boxes, tabelas ou diagramas (sem "desertos de texto")
+- Capa TikZ + \\tableofcontents + mín 2 TikZ + mín 8 páginas + 4+ tipos de box
 - Tabelas com \\rowcolor alternado aeelightblue/white
 - Análises específicas ao diagnóstico (TEA ≠ TDAH ≠ DI)
-- Variedade de boxes (4+ tipos: infobox, alertbox, successbox, dicabox, tealbox, etc.)
+- Quebrar texto longo com boxes, tabelas ou diagramas (sem "desertos de texto")
+
+CAPA TIKZ (copie e adapte — NÃO invente sintaxe):
+\\thispagestyle{empty}
+\\begin{tikzpicture}[remember picture,overlay]
+  \\fill[aeeblue] (current page.north west) rectangle (current page.south east);
+  \\fill[aeegold] ([yshift=-6cm]current page.north west) rectangle ([yshift=-6.15cm]current page.north east);
+  \\node[anchor=north,text=white,font=\\Huge\\bfseries,text width=14cm,align=center] at ([yshift=-3cm]current page.north) {TÍTULO DO DOCUMENTO};
+  \\node[anchor=north,text=aeegold,font=\\Large] at ([yshift=-5cm]current page.north) {\\faIcon{graduation-cap} Atendimento Educacional Especializado};
+\\end{tikzpicture}
+\\begin{tikzpicture}[remember picture,overlay]
+  \\node[anchor=south,yshift=3cm] at (current page.south) {
+    \\begin{tcolorbox}[enhanced,colback=white,colframe=aeegold,width=12cm,boxrule=1pt,arc=4pt,shadow={2mm}{-2mm}{0mm}{black!30}]
+    \\centering\\small
+    \\begin{tabularx}{11cm}{lX}
+    \\field{Aluno(a)}{Nome}
+    \\field{Escola}{Nome da Escola}
+    \\field{Data}{\\today}
+    \\end{tabularx}
+    \\end{tcolorbox}
+  };
+\\end{tikzpicture}
+\\newpage
 
 Consulte get_prompt_template para instruções Pro Max específicas ao tipo de documento.`;
 }

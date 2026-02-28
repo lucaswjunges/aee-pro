@@ -59,6 +59,7 @@ interface ClaudeContentBlock {
   tool_use_id?: string;
   content?: string;
   is_error?: boolean;
+  cache_control?: { type: "ephemeral" };
 }
 
 interface SSEEvent {
@@ -501,22 +502,34 @@ async function* streamAnthropicWithTools(
       },
     ],
     messages: filterMessagesForAnthropic(messages),
-    tools: tools.map((t) => ({
+    // Prompt caching: cache_control on last tool enables Anthropic to cache the
+    // entire tools array (~500 tokens) across agent loop iterations. Combined with
+    // the cached system prompt, this saves ~90% on input tokens per iteration.
+    tools: tools.map((t, i) => ({
       name: t.name,
       description: t.description,
       input_schema: t.input_schema,
+      ...(i === tools.length - 1 ? { cache_control: { type: "ephemeral" } } : {}),
     })),
     stream: true,
   };
 
   // Extended thinking for supported models
   if (options.thinking) {
-    const defaultBudget = Math.min(10000, Math.floor(options.maxTokens / 4));
-    body.thinking = {
-      type: "enabled",
-      budget_tokens: options.thinkingBudget ?? defaultBudget,
-    };
-    // Anthropic constraint: thinking requires temperature=1
+    const baseModel = model.includes("/") ? model.split("/").pop()! : model;
+    if (baseModel.startsWith("claude-opus-4")) {
+      // Opus 4.6 supports adaptive thinking — model calibrates depth per task.
+      // Simple requests (compile, edit) → brief thinking.
+      // Complex requests (create 15-page anamnese) → deep thinking.
+      body.thinking = { type: "adaptive" };
+    } else {
+      // Other Claude models: explicit budget
+      const defaultBudget = Math.min(10000, Math.floor(options.maxTokens / 4));
+      body.thinking = {
+        type: "enabled",
+        budget_tokens: options.thinkingBudget ?? defaultBudget,
+      };
+    }
     body.temperature = 1;
   }
 
@@ -602,7 +615,17 @@ async function* streamAnthropicWithTools(
 
         const eventType = event.type as string;
 
-        if (eventType === "content_block_start") {
+        if (eventType === "message_start") {
+          // Log token usage including cache metrics for cost visibility
+          const message = event.message as Record<string, unknown> | undefined;
+          const usage = message?.usage as Record<string, number> | undefined;
+          if (usage) {
+            const cached = usage.cache_read_input_tokens || 0;
+            const created = usage.cache_creation_input_tokens || 0;
+            const input = usage.input_tokens || 0;
+            console.log(`[agent] tokens: input=${input}, cache_read=${cached}, cache_create=${created}${cached > 0 ? ` (${Math.round(cached / (input + cached + created) * 100)}% cached)` : ""}`);
+          }
+        } else if (eventType === "content_block_start") {
           const block = event.content_block as Record<string, unknown>;
           currentBlockType = block.type as string;
 
@@ -678,6 +701,11 @@ async function* streamAnthropicWithTools(
           if (delta.stop_reason) {
             stopReason = delta.stop_reason as string;
           }
+          // Log final output token count
+          const deltaUsage = event.usage as Record<string, number> | undefined;
+          if (deltaUsage?.output_tokens) {
+            console.log(`[agent] output_tokens=${deltaUsage.output_tokens}`);
+          }
         } else if (eventType === "message_stop") {
           // Stream complete
         }
@@ -694,17 +722,45 @@ async function* streamAnthropicWithTools(
 }
 
 /**
- * Filter messages for Anthropic API compatibility.
- * Removes thinking blocks from historical messages (only keep in current turn).
+ * Prepare messages for Anthropic API with incremental prompt caching.
+ *
+ * Adds a cache_control breakpoint on the last user message so the API caches
+ * the entire prefix (system + tools + all messages up to that point). On each
+ * agent loop iteration, only the new tool results / text need to be processed,
+ * saving ~90% on input tokens for the cached prefix.
+ *
+ * Creates new objects — never mutates the original messages array.
  */
 function filterMessagesForAnthropic(
   messages: ClaudeMessage[]
 ): ClaudeMessage[] {
-  return messages.map((m) => {
-    if (typeof m.content === "string") return m;
-    // Keep thinking blocks — Anthropic validates signatures
-    return m;
-  });
+  const result = messages.map((m) => m); // shallow copy (same objects)
+
+  // Find the last user message and add cache_control to its last content block.
+  // This is our 3rd cache breakpoint (after system prompt and tools).
+  for (let i = result.length - 1; i >= 0; i--) {
+    if (result[i].role !== "user") continue;
+    const msg = result[i];
+
+    if (typeof msg.content === "string") {
+      result[i] = {
+        role: "user",
+        content: [
+          { type: "text", text: msg.content, cache_control: { type: "ephemeral" } },
+        ] as unknown as ClaudeContentBlock[],
+      };
+    } else if (Array.isArray(msg.content) && msg.content.length > 0) {
+      const blocks = [...msg.content];
+      blocks[blocks.length - 1] = {
+        ...blocks[blocks.length - 1],
+        cache_control: { type: "ephemeral" },
+      };
+      result[i] = { role: "user", content: blocks };
+    }
+    break;
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------

@@ -1173,6 +1173,7 @@ async function createProMaxAgentResponse(opts: {
             promptTemplates,
             proMaxEnhancements: PRO_MAX_ENHANCEMENTS,
             projectId,
+            model: "claude-opus-4-6",
             maxTurns: 35,
             maxThinkingTokens: 16000,
           }),

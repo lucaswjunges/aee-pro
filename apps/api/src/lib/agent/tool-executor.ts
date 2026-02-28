@@ -8,7 +8,7 @@ import {
 import type { Database } from "../../db/index";
 import { compileLatex, type CompileImage, type CompileFile } from "../latex/compiler-client";
 import { sanitizeLatexSource } from "../latex/sanitizer";
-import { injectProfessionalPreamble } from "../latex/preamble";
+import { injectProfessionalPreamble, isBeamerDocument, injectBeamerColors } from "../latex/preamble";
 import { validateAndFixLatex } from "../latex/validator";
 import { PRO_MAX_ENHANCEMENTS } from "../latex/document-types";
 import { analyzeLatexStructure, formatQualityReport } from "../latex/quality-analyzer";
@@ -296,10 +296,18 @@ async function editFile(
     matchedOld = collapseBlankLines(collapseWhitespace(normOld));
     targetContent = collapseBlankLines(collapseWhitespace(normContent));
   } else if (
+    normOld.length <= 5000 &&
+    tryFlexibleBlankLines(normContent, normOld, collapseWhitespace)
+  ) {
+    // 5. Flexible blank lines: old_text has fewer/more blank lines than file
+    const result = tryFlexibleBlankLines(normContent, normOld, collapseWhitespace)!;
+    matchedOld = result.matchedOld;
+    targetContent = result.targetContent;
+  } else if (
     path.endsWith(".tex") &&
     fixDoubleEscapedLatex(normContent).includes(normOld)
   ) {
-    // 5. File content is double-escaped but old_text is correct — match against unescaped file
+    // 6. File content is double-escaped but old_text is correct — match against unescaped file
     matchedOld = normOld;
     targetContent = fixDoubleEscapedLatex(normContent);
   } else {
@@ -498,8 +506,9 @@ async function compileLatexFile(
   }
 
   // Validate & auto-fix with Haiku BEFORE preamble/sanitization
+  // Skip for Beamer — Haiku doesn't understand Beamer structure well
   // Fixes are written back to the stored file so the AI sees the corrected version
-  if (ctx.aiApiKey && ctx.aiProvider === "anthropic") {
+  if (ctx.aiApiKey && ctx.aiProvider === "anthropic" && !isBeamerDocument(rawSource)) {
     console.log("[compile_latex] step 3b: Haiku validation START");
     await yieldEventLoop();
     const validation = await validateAndFixLatex(rawSource, ctx.aiApiKey);
@@ -522,47 +531,68 @@ async function compileLatexFile(
   }
 
   // Auto-inject professional preamble:
-  // - If AI wrote \documentclass: replace its preamble with the professional one
-  // - If AI followed instructions (no \documentclass, starts at \begin{document}): prepend professional preamble
+  // - Beamer: keep AI preamble, only inject AEE colors
+  // - Article: replace AI preamble with professional one
   let sourceForSanitize = rawSource;
+  const isBeamer = isBeamerDocument(rawSource);
   if (rawSource.includes("\\begin{document}")) {
-    // Get fallback student/school from project
-    let fallbackStudent: string | undefined;
-    let fallbackSchool: string | undefined;
-    try {
-      const project = await ctx.db
-        .select()
-        .from(workspaceProjects)
-        .where(eq(workspaceProjects.id, ctx.projectId))
-        .get();
-      if (project?.studentId) {
-        const student = await ctx.db
+    if (isBeamer) {
+      // Beamer presentations: preserve AI structure, just add AEE color palette
+      sourceForSanitize = injectBeamerColors(rawSource);
+      console.log("[compile_latex] Beamer detected — injected colors only");
+    } else {
+      // Standard documents: replace with professional AEE preamble
+      let fallbackStudent: string | undefined;
+      let fallbackSchool: string | undefined;
+      try {
+        const project = await ctx.db
           .select()
-          .from(students)
-          .where(and(eq(students.id, project.studentId), eq(students.userId, ctx.userId)))
+          .from(workspaceProjects)
+          .where(eq(workspaceProjects.id, ctx.projectId))
           .get();
-        if (student) {
-          fallbackStudent = student.name || undefined;
-          fallbackSchool = student.school || undefined;
+        if (project?.studentId) {
+          const student = await ctx.db
+            .select()
+            .from(students)
+            .where(and(eq(students.id, project.studentId), eq(students.userId, ctx.userId)))
+            .get();
+          if (student) {
+            fallbackStudent = student.name || undefined;
+            fallbackSchool = student.school || undefined;
+          }
         }
-      }
-    } catch { /* non-critical — proceed without fallbacks */ }
+      } catch { /* non-critical — proceed without fallbacks */ }
 
-    const fallbackTitle = path.replace(/\.tex$/, "").replace(/[-_]/g, " ");
-    sourceForSanitize = injectProfessionalPreamble(rawSource, fallbackTitle, fallbackStudent, fallbackSchool);
-    console.log("[compile_latex] preamble injected, new length:", sourceForSanitize.length);
+      const fallbackTitle = path.replace(/\.tex$/, "").replace(/[-_]/g, " ");
+      sourceForSanitize = injectProfessionalPreamble(rawSource, fallbackTitle, fallbackStudent, fallbackSchool);
+      console.log("[compile_latex] preamble injected, new length:", sourceForSanitize.length);
+    }
   }
 
-  // Sanitize: fix common AI-generated LaTeX issues (same pipeline as document generation)
-  // Yield before/after because the sanitizer runs 24+ regex passes synchronously
+  // Sanitize: fix common AI-generated LaTeX issues
+  // Beamer: skip heavy article-specific sanitization (tcolorbox fixes, tabularx overflow, etc.)
+  // Only apply emoji stripping and basic fixes
   await yieldEventLoop();
-  console.log("[compile_latex] step 4: sanitize START");
+  console.log("[compile_latex] step 4: sanitize START", isBeamer ? "(Beamer — light)" : "");
   const sanitizeStart = Date.now();
-  let latexSource = sanitizeLatexSource(sourceForSanitize);
+  let latexSource = isBeamer
+    ? sourceForSanitize.replace(/[\u2600-\u27BF\u{1F000}-\u{10FFFF}]/gu, "") // strip emoji only
+    : sanitizeLatexSource(sourceForSanitize);
   console.log("[compile_latex] step 4a: sanitize done in", Date.now() - sanitizeStart, "ms");
-  // Fix \\ after sectioning commands — causes "There's no line here to end"
-  latexSource = fixLineBreakAfterSectioning(latexSource);
-  console.log("[compile_latex] step 4b: fixLineBreak done");
+  if (!isBeamer) {
+    // Fix environment syntax: atividadebox[cor][T] → [cor]{T}
+    latexSource = latexSource.replace(
+      /\\begin\{atividadebox\}\[([^\]]*)\]\[([^\]]*)\]/g,
+      "\\begin{atividadebox}[$1]{$2}"
+    );
+    latexSource = latexSource.replace(
+      /\\begin\{atividadebox\}\{(aee\w+|[a-z]+)\}\{([^}]*)\}/g,
+      "\\begin{atividadebox}[$1]{$2}"
+    );
+    // Fix \\ after sectioning commands — causes "There's no line here to end"
+    latexSource = fixLineBreakAfterSectioning(latexSource);
+    console.log("[compile_latex] step 4b: fixLineBreak done");
+  }
   await yieldEventLoop();
 
   // Collect all project files for compilation
@@ -1108,6 +1138,32 @@ function fixDoubleEscapedLatex(content: string): string {
     return content.replace(/\\\\/g, "\\");
   }
   return content;
+}
+
+/** Try matching old_text against content with flexible blank lines.
+ *  Returns null if no match, or { matchedOld, targetContent } on success. */
+function tryFlexibleBlankLines(
+  normContent: string,
+  normOld: string,
+  collapseWhitespace: (s: string) => string
+): { matchedOld: string; targetContent: string } | null {
+  const stripBlanks = (s: string) => s.replace(/(\n[ \t]*){2,}/g, "\n");
+  const sContent = stripBlanks(collapseWhitespace(normContent));
+  const sOld = stripBlanks(collapseWhitespace(normOld));
+  if (!sContent.includes(sOld)) return null;
+  // Build regex from old_text lines, allowing flexible blank lines between them
+  const escRx = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const lines = sOld.split("\n");
+  const pattern = lines.map((l) => escRx(l)).join("[ \\t]*\\n(?:[ \\t]*\\n)*[ \\t]*");
+  try {
+    const re = new RegExp(pattern);
+    const cwContent = collapseWhitespace(normContent);
+    const m = cwContent.match(re);
+    if (m) {
+      return { matchedOld: m[0], targetContent: cwContent };
+    }
+  } catch { /* regex too complex */ }
+  return null;
 }
 
 function isBinaryMime(mime: string): boolean {

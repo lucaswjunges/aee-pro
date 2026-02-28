@@ -39,6 +39,7 @@ export async function runAgent(opts) {
     promptTemplates,
     proMaxEnhancements,
     projectId,
+    model: requestModel,
     maxTurns,
     maxThinkingTokens,
     sendSSE,
@@ -86,7 +87,7 @@ export async function runAgent(opts) {
   const fullSystemPrompt = systemPrompt + contextBlock;
 
   // 4. Run the Agent SDK query
-  const model = process.env.AGENT_MODEL || "claude-sonnet-4-6";
+  const model = requestModel || process.env.AGENT_MODEL || "claude-sonnet-4-6";
   console.log(`[agent] Starting query() — model: ${model}, maxTurns: ${maxTurns}`);
 
   try {

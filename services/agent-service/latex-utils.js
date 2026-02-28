@@ -376,6 +376,26 @@ function fixLineBreakAfterSectioning(source) {
   return result;
 }
 
+/**
+ * Fix common LaTeX syntax errors:
+ * - \begin{atividadebox}[cor][titulo] → \begin{atividadebox}[cor]{titulo}
+ * - \begin{atividadebox}{cor}{titulo} → \begin{atividadebox}[cor]{titulo}
+ */
+function fixEnvironmentSyntax(source) {
+  // atividadebox takes [optional-color]{mandatory-title}
+  // Fix: [color][title] → [color]{title}
+  let result = source.replace(
+    /\\begin\{atividadebox\}\[([^\]]*)\]\[([^\]]*)\]/g,
+    "\\begin{atividadebox}[$1]{$2}"
+  );
+  // Fix: {color}{title} → [color]{title}
+  result = result.replace(
+    /\\begin\{atividadebox\}\{(aee\w+|[a-z]+)\}\{([^}]*)\}/g,
+    "\\begin{atividadebox}[$1]{$2}"
+  );
+  return result;
+}
+
 // ---------- Local pdflatex compilation ----------
 
 /**
@@ -408,6 +428,9 @@ export async function compileLatexLocal(relPath, workDir) {
     const fallbackTitle = relPath.replace(/\.tex$/, "").replace(/[-_]/g, " ");
     compileSource = injectProfessionalPreamble(rawSource, fallbackTitle, "", "");
   }
+
+  // Fix environment syntax errors (atividadebox [cor][T] → [cor]{T})
+  compileSource = fixEnvironmentSyntax(compileSource);
 
   // Fix line breaks after sectioning
   compileSource = fixLineBreakAfterSectioning(compileSource);

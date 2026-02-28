@@ -103,7 +103,7 @@ export function LatexDocumentsPage() {
 
   const handleDownloadWorkspaceFile = async (file: WorkspaceOutputFile) => {
     const token = api.getToken();
-    const res = await fetch(`${API_BASE}/workspace/files/${file.id}`, {
+    const res = await fetch(`${API_BASE}/workspace/files/${file.id}?t=${Date.now()}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (res.ok) {

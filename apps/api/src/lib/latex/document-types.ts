@@ -32,7 +32,7 @@ export const DOCUMENT_TYPE_CONFIGS: Record<string, DocumentTypeConfig> = {
 - Diagnóstico e saúde em alertbox
 - Contexto familiar (com diagrama TikZ da árvore familiar se heat >= 3)
 - Barreiras vs Potencialidades (diagrama lado a lado em TikZ se heat >= 3)
-- Análise do desenvolvimento com gráfico de barras pgfplots (se heat >= 3) mostrando nível por dimensão
+- Análise do desenvolvimento com diagrama TikZ (se heat >= 3) mostrando nível por dimensão
 - Estratégias de intervenção em tabela colorida
 - Cronograma de acompanhamento (timeline TikZ se heat >= 3)
 - Orientações à família em successbox
@@ -130,7 +130,7 @@ export const DOCUMENT_TYPE_CONFIGS: Record<string, DocumentTypeConfig> = {
 - Período avaliado
 - Comparação lado a lado (antes vs agora) por área:
   - Cognitivo, Linguagem, Motor, Social, Autonomia, Acadêmico
-- Gráfico pgfplots de evolução comparativa (se heat >= 3)
+- Diagrama TikZ de evolução comparativa (se heat >= 3)
 - Avanços significativos em successbox
 - Pontos de atenção/retrocesso em alertbox
 - Fatores que contribuíram para avanços
@@ -220,7 +220,7 @@ export const DOCUMENT_TYPE_CONFIGS: Record<string, DocumentTypeConfig> = {
 - Desenvolvimento global por aspecto:
   - Cognitivo, Motor, Linguagem, Social, Emocional, Autonomia
 - Desempenho acadêmico (Português, Matemática, demais áreas)
-- Gráfico pgfplots de avaliação por dimensão (se heat >= 4)
+- Diagrama TikZ de avaliação por dimensão (se heat >= 4)
 - Participação no AEE
 - Avanços do período em successbox
 - Aspectos em desenvolvimento em alertbox
@@ -240,10 +240,10 @@ ESTRUTURA OBRIGATÓRIA:
 2. \\tableofcontents + \\newpage
 3. PERFIL E OBJETIVOS: Diagrama TikZ estilo mind map com o aluno no centro e 5 objetivos ao redor (cada um em block colorido com setas). Seguido de dicabox com a expectativa da família.
 4. ESTRUTURA DAS SESSÕES: Diagrama TikZ de fluxo horizontal com 4 fases (Acolhida→Atividade Principal→Complementar→Fechamento), cada fase com cor distinta, label de tempo acima. Seguido de materialbox com material fixo.
-5. BANCO DE ATIVIDADES — LEITURA (3 atividades): Cada uma em atividadebox[aeegreen] com \\starmark, objtags coloridos, descrição rica, lista de materiais, passo a passo numerado detalhado, variações, tempo estimado. Intercalar com dicabox de dicas práticas.
-6. BANCO DE ATIVIDADES — ESCRITA (2+ atividades): atividadebox[aeeblue]. Uma delas DEVE ter diagrama TikZ de progressão (ex: Fase 1→2→3→4→5 com setas).
-7. BANCO DE ATIVIDADES — SOCIALIZAÇÃO E COMUNICAÇÃO (2+ atividades): atividadebox[aeepurple]
-8. BANCO DE ATIVIDADES — AUTONOMIA E ROTINA (2+ atividades): atividadebox[aeeorange]. Uma DEVE ter tabularx com estações de circuito com \\rowcolor alternado.
+5. BANCO DE ATIVIDADES — LEITURA (3 atividades): Cada uma em \\begin{atividadebox}[aeegreen]{Título da Atividade} com \\starmark, objtags coloridos, descrição rica, lista de materiais, passo a passo numerado detalhado, variações, tempo estimado. Intercalar com dicabox de dicas práticas.
+6. BANCO DE ATIVIDADES — ESCRITA (2+ atividades): \\begin{atividadebox}[aeeblue]{Título}. Uma delas DEVE ter diagrama TikZ de progressão (ex: Fase 1→2→3→4→5 com setas).
+7. BANCO DE ATIVIDADES — SOCIALIZAÇÃO E COMUNICAÇÃO (2+ atividades): \\begin{atividadebox}[aeepurple]{Título}
+8. BANCO DE ATIVIDADES — AUTONOMIA E ROTINA (2+ atividades): \\begin{atividadebox}[aeeorange]{Título}. Uma DEVE ter tabularx com estações de circuito com \\rowcolor alternado.
 9. PLANEJAMENTO SEMANAL (4 semanas): Cada semana em sessaobox[Semana N — Foco: X] com tabularx interna (colunas: Dia, Acolhida, Atividade Principal, Complementar, Fechamento) e \\rowcolor{aeelightblue} alternado.
 10. INDICADORES DE PROGRESSO: Ficha de registro em TikZ (node com tabularx dentro, drop shadow, cabeçalho aeeblue com texto branco, campos: data, atividade, engajamento, apoio, comportamento, conquista, observações). Tabela de metas mensuráveis por área com \\rowcolor{lightgreen} alternado.
 11. RECURSOS GRATUITOS: Tabela com recurso, descrição, tipo (App/Online), com \\rowcolor{aeelightblue} alternado.
@@ -645,7 +645,7 @@ Meta: 12-18 páginas, guia profissional publicável. Após compilar, chame asses
 
 EXEMPLAR de atividade excelente:
 
-\\begin{atividadebox}[aeegreen][\\faIcon{book-open} Leitura Compartilhada Adaptada]
+\\begin{atividadebox}[aeegreen]{\\faIcon{book-open} Leitura Compartilhada Adaptada}
 \\objtag[aeeblue]{Linguagem receptiva} \\objtag[aeegreen]{Vocabulário} \\objtag[aeepurple]{Atenção compartilhada}
 
 Leitura mediada com livro de imagens grandes e texto simplificado, focando em nomeação,

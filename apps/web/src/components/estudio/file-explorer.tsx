@@ -302,7 +302,7 @@ export function FileExplorer({
   const handleDownload = async (file: WorkspaceFile, e: React.MouseEvent) => {
     e.stopPropagation();
     const token = api.getToken();
-    const res = await fetch(`${API_BASE}/workspace/files/${file.id}`, {
+    const res = await fetch(`${API_BASE}/workspace/files/${file.id}?t=${Date.now()}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (res.ok) {

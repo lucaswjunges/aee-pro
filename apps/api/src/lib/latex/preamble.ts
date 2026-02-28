@@ -137,8 +137,8 @@ ${printMode === "bw" ? BW_COLOR_OVERRIDES : ""}
 \\usepackage[fit]{truncate}
 \\pagestyle{fancy}
 \\fancyhf{}
-\\fancyhead[L]{\\small\\color{textgray}\\textit{\\truncate{0.45\\headwidth}{${escapeLatex(documentTitle)}}}}
-\\fancyhead[R]{\\small\\color{textgray}\\textit{\\truncate{0.45\\headwidth}{${escapeLatex(studentName)} --- ${escapeLatex(schoolName)}}}}
+\\fancyhead[L]{\\small\\color{textgray}\\textit{\\truncate{0.40\\headwidth}{${escapeLatex(documentTitle)}}}}
+\\fancyhead[R]{\\small\\color{textgray}\\textit{\\truncate{0.40\\headwidth}{${escapeLatex(studentName)} --- ${escapeLatex(schoolName)}}}}
 \\fancyfoot[C]{\\small\\color{textgray}\\thepage}
 \\fancyfoot[R]{}
 \\renewcommand{\\headrulewidth}{0.4pt}
@@ -451,6 +451,53 @@ export function injectProfessionalPreamble(
   const body = source.substring(beginDocIdx);
 
   return professionalPreamble + "\n" + body;
+}
+
+/**
+ * Check if a LaTeX source is a Beamer presentation.
+ */
+export function isBeamerDocument(source: string): boolean {
+  const preamble = source.substring(0, source.indexOf("\\begin{document}") || 500);
+  return /\\documentclass(\[[^\]]*\])?\{beamer\}/.test(preamble);
+}
+
+/**
+ * Inject AEE colors and basic setup into a Beamer preamble.
+ * Preserves the AI-generated Beamer structure (theme, frames, etc.)
+ * but adds our standard color palette so \color{aeeblue} etc. work.
+ */
+export function injectBeamerColors(source: string): string {
+  const beginDocIdx = source.indexOf("\\begin{document}");
+  if (beginDocIdx === -1) return source;
+
+  const preamble = source.substring(0, beginDocIdx);
+  const body = source.substring(beginDocIdx);
+
+  // Only inject if colors aren't already defined
+  if (preamble.includes("aeeblue")) return source;
+
+  const colorDefs = `
+% --- AEE+ Pro Colors ---
+\\usepackage[dvipsnames,svgnames,x11names]{xcolor}
+\\definecolor{aeeblue}{HTML}{1E3A5F}
+\\definecolor{aeegold}{HTML}{C9A84C}
+\\definecolor{aeelightblue}{HTML}{E8F0FE}
+\\definecolor{aeegreen}{HTML}{2E7D32}
+\\definecolor{aeered}{HTML}{C62828}
+\\definecolor{aeeorange}{HTML}{E65100}
+\\definecolor{aeepurple}{HTML}{6A1B9A}
+\\definecolor{aeeteal}{HTML}{00695C}
+\\definecolor{aeegray}{HTML}{F5F5F5}
+\\definecolor{textgray}{HTML}{555555}
+\\definecolor{lightgreen}{HTML}{E8F5E9}
+\\definecolor{lightorange}{HTML}{FFF3E0}
+\\definecolor{lightpurple}{HTML}{F3E5F5}
+\\definecolor{lightteal}{HTML}{E0F2F1}
+\\definecolor{lightred}{HTML}{FFEBEE}
+\\definecolor{lightyellow}{HTML}{FFFDE7}
+`;
+
+  return preamble + colorDefs + "\n" + body;
 }
 
 function escapeLatex(text: string): string {

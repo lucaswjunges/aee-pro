@@ -44,6 +44,8 @@ export function EstudioProjectPage() {
 
   // Track PDF file timestamps to detect new/recompiled PDFs
   const prevPdfStateRef = useRef<Map<string, string>>(new Map());
+  const selectedFileRef = useRef(selectedFile);
+  selectedFileRef.current = selectedFile;
 
   const loadProject = useCallback(async () => {
     if (!id) return;
@@ -62,11 +64,29 @@ export function EstudioProjectPage() {
           .map((file) => [file.id, file.updatedAt || ""])
       );
       if (prevPdfStateRef.current.size > 0) {
+        let pdfChanged = false;
+        let changedPdfFile: WorkspaceFile | undefined;
         for (const [pdfId, updatedAt] of newPdfState) {
           const prev = prevPdfStateRef.current.get(pdfId);
           if (prev === undefined || prev !== updatedAt) {
-            notifyPdfReady();
+            pdfChanged = true;
+            changedPdfFile = f.find((ff) => ff.id === pdfId);
             break;
+          }
+        }
+        if (pdfChanged) {
+          notifyPdfReady();
+          // Auto-refresh preview if user is viewing the recompiled PDF
+          if (changedPdfFile && selectedFileRef.current?.id === changedPdfFile.id) {
+            const token = api.getToken();
+            fetch(`${API_BASE}/workspace/files/${changedPdfFile.id}?t=${Date.now()}`, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            }).then(async (res) => {
+              if (res.ok) {
+                const blob = await res.blob();
+                setPreviewUrl(URL.createObjectURL(blob));
+              }
+            });
           }
         }
       } else if (newPdfState.size === 0) {
@@ -102,7 +122,9 @@ export function EstudioProjectPage() {
       if (file.mimeType === "application/pdf" || file.mimeType.startsWith("image/")) {
         setPreviewText(null);
         const token = api.getToken();
-        const res = await fetch(`${API_BASE}/workspace/files/${file.id}`, {
+        // Cache-bust PDFs to always get the latest version after recompilation
+        const cacheBust = file.mimeType === "application/pdf" ? `?t=${Date.now()}` : "";
+        const res = await fetch(`${API_BASE}/workspace/files/${file.id}${cacheBust}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (res.ok) {
