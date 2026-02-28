@@ -209,6 +209,7 @@ REGRAS CRÍTICAS LaTeX:
 - Dentro de tcolorbox: use \\linewidth (não \\textwidth)
 - SEMPRE compile automaticamente após criar/editar .tex
 - TikZ: use tikzpicture com \\node e \\draw (SEM pgfplots/axis). Feche TODOS os [] e {} corretamente.
+  \\foreach: max 2 variáveis (\\x/\\y). NUNCA use \\color como variável (conflita com comando LaTeX).
 - Para radar de desenvolvimento, use este padrão:
   \\begin{tikzpicture}[scale=0.8]
   \\foreach \\a/\\l [count=\\i] in {90/Motor,30/Linguagem,...} {

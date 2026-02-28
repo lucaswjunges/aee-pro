@@ -589,6 +589,11 @@ async function compileLatexFile(
       /\\begin\{atividadebox\}\{(aee\w+|[a-z]+)\}\{([^}]*)\}/g,
       "\\begin{atividadebox}[$1]{$2}"
     );
+    // Fix: {title} without color → [aeeblue]{title} (empty color = broken colback=!5)
+    latexSource = latexSource.replace(
+      /\\begin\{atividadebox\}\{([^}]*)\}/g,
+      "\\begin{atividadebox}[aeeblue]{$1}"
+    );
     // Fix: \field{A}{B} & \field{C}{D} → remove extra & between \field macros
     latexSource = latexSource.replace(
       /\\field\{([^}]*)\}\{([^}]*)\}\s*&\s*\\field\{/g,
@@ -610,6 +615,11 @@ async function compileLatexFile(
         `\\faIcon{${correct}}`
       );
     }
+    // Fix deprecated \tikzstyle → \tikzset
+    latexSource = latexSource.replace(
+      /\\tikzstyle\{([^}]+)\}\s*=\s*\[([^\]]*)\]/g,
+      "\\tikzset{$1/.style={$2}}"
+    );
     // Fix Unicode math symbols that break pdflatex (inputenc[utf8]+T1 handles basic typography)
     const unicodeFixes: Record<string, string> = {
       "\u00D7": "$\\times$",       // ×

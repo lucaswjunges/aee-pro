@@ -394,6 +394,14 @@ function fixEnvironmentSyntax(source) {
     /\\begin\{atividadebox\}\{(aee\w+|[a-z]+)\}\{([^}]*)\}/g,
     "\\begin{atividadebox}[$1]{$2}"
   );
+  // Fix: {title} without color → [aeeblue]{title} (empty color = broken colback=!5)
+  result = result.replace(
+    /\\begin\{atividadebox\}\{([^}]*)\}/g,
+    (match, title) => {
+      // Skip if it's already correct (title after [color]) — those were handled above
+      return `\\begin{atividadebox}[aeeblue]{${title}}`;
+    }
+  );
 
   // Fix: \field{A}{B} & \field{C}{D} → remove the extra & between \field macros
   // \field already contains & internally, so adding extra & breaks 2-column tabularx
@@ -429,6 +437,12 @@ function fixEnvironmentSyntax(source) {
       `\\faIcon{${correct}}`
     );
   }
+
+  // Fix deprecated \tikzstyle → \tikzset (removed in recent TikZ versions)
+  result = result.replace(
+    /\\tikzstyle\{([^}]+)\}\s*=\s*\[([^\]]*)\]/g,
+    "\\tikzset{$1/.style={$2}}"
+  );
 
   // Fix Unicode math symbols that break pdflatex (inputenc[utf8]+T1 handles basic typography)
   const unicodeFixes = {
