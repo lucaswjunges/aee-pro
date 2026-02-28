@@ -603,7 +603,10 @@ function buildToolLogText(rawEvents?: RawSSEEvent[], pairs?: ToolPair[]): string
           const truncated = text.length > 300 ? text.slice(0, 300) + "…" : text;
           lines.push(`[tool_result] ${ev.tool} → ${ok ? "OK" : "ERRO"}: ${truncated}`);
         } else {
-          lines.push(`[tool_result] ${ev.tool} → ${ev.content || "(sem resultado)"}`);
+          // result can be a plain string (e.g. get_student_data, get_prompt_template)
+          const text = (typeof res === "string" ? res : ev.content) || "(sem resultado)";
+          const truncated = text.length > 300 ? text.slice(0, 300) + "…" : text;
+          lines.push(`[tool_result] ${ev.tool} → ${truncated}`);
         }
       } else if (ev.type === "agent_spawn") {
         lines.push(`[agent_spawn] ${ev.agentTask || "tarefa"} (id: ${ev.agentId || "?"})`);

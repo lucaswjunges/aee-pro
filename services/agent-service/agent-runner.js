@@ -182,6 +182,7 @@ export async function runAgent(opts) {
     let totalCostUsd = 0;
     let streamedTextLength = 0; // Track how much text was streamed token-by-token in current turn
     let totalTextEmitted = 0;   // Track total text ever emitted (never resets)
+    const toolUseIdToName = new Map(); // Map tool_use_id → tool name for tool_result events
 
     for await (const message of agentQuery) {
       switch (message.type) {
@@ -208,6 +209,8 @@ export async function runAgent(opts) {
 
           for (const block of content) {
             if (block.type === "tool_use") {
+              // Map tool_use_id → tool name so tool_result events can reference the name
+              toolUseIdToName.set(block.id, block.name);
               sendSSE({
                 type: "tool_call",
                 tool: block.name,
@@ -242,9 +245,11 @@ export async function runAgent(opts) {
                   ? block.content
                   : JSON.stringify(block.content);
 
+              // Resolve tool name from tool_use_id (falls back to id if not found)
+              const toolName = toolUseIdToName.get(block.tool_use_id) || block.tool_use_id;
               sendSSE({
                 type: "tool_result",
-                tool: block.tool_use_id,
+                tool: toolName,
                 result: resultText.length > 2000
                   ? resultText.slice(0, 2000) + "..."
                   : resultText,

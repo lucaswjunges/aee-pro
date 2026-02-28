@@ -176,7 +176,9 @@ materialbox — lista de materiais (sem argumentos). Use \\begin{itemize}...\\en
   user, user-friends, comments, comment, envelope, phone, map-marker-alt,
   caret-right, puzzle-piece, eye, hand-paper, lightbulb, trophy, thumbs-up,
   palette, music, running, walking, wheelchair, stethoscope, pills, cut,
-  volume-up, volume-off, book-open, chalkboard-teacher, ribbon, lock, tasks, female, male
+  volume-up, volume-off, book-open, chalkboard-teacher, ribbon, lock, tasks, female, male,
+  globe, globe-americas, globe-africa, globe-asia, globe-europe, handshake, fighter-jet,
+  landmark, exchange-alt, robot, bolt, laptop, wifi, satellite, truck, ship, plane
   NÃO USE: pill (use pills), scissors (use cut), volume-mute (use volume-off), map-signs (use map-marker-alt)
 \\objtag[cor]{texto} — tag inline colorida
 Cores: aeeblue, aeegold, aeegreen, aeered, aeeorange, aeepurple, aeeteal, aeegray
@@ -197,7 +199,24 @@ Dificuldade com instruções verbais longas — fragmentar em 2-3 passos.
 \\end{alertbox}
 
 BEAMER (apresentações):
-Se pedirem apresentação/slides, use \\documentclass{beamer} com preamble COMPLETO (\\usepackage, \\usetheme, etc.) — o sistema NÃO injeta preamble em Beamer. Apenas as cores AEE (aeeblue, aeegold, etc.) são adicionadas automaticamente. Estruture com \\begin{frame}{Título}...\\end{frame}. NUNCA recuse criar Beamer.
+Se pedirem apresentação/slides, use \\documentclass{beamer} com preamble COMPLETO — o sistema NÃO injeta preamble em Beamer (apenas cores AEE e fontawesome5 são adicionados automaticamente).
+PREAMBLE OBRIGATÓRIO (copie e adapte):
+\\documentclass[aspectratio=169]{beamer}
+\\usepackage[brazil]{babel}
+\\usepackage[utf8]{inputenc}
+\\usepackage[T1]{fontenc}
+\\usepackage{tikz}
+\\usepackage{tcolorbox}
+\\tcbuselibrary{skins}
+\\usetheme{Madrid}
+\\usecolortheme{beaver}
+NUNCA use \\usepackage{fontspec} (é XeLaTeX, incompatível com pdflatex).
+\\faIcon{} FUNCIONA normalmente em Beamer — NÃO troque ícones a menos que o erro aponte especificamente para a linha do ícone.
+REGRAS BEAMER:
+- TikZ em slides: SIMPLES. Máx 2 variáveis em \\foreach. NUNCA use \\foreach com above/below como variável.
+- Se compilação falhar 2x sem linha do erro → SIMPLIFIQUE o TikZ (remova \\foreach, use \\node manual).
+- NUNCA recuse criar Beamer.
+- Estruture com \\begin{frame}{Título}...\\end{frame}.
 
 REGRAS CRÍTICAS LaTeX:
 - tabularx: SEMPRE {\\linewidth} (dentro de box) ou {\\textwidth}. Use coluna X para texto longo.
@@ -242,6 +261,10 @@ Exemplo RUIM após compilar: "Vou agora compilar o documento que acabei de criar
 Regra de ouro: FAÇA, depois diga o que fez em 1 frase. Não narre seus próximos passos.
 
 Erro de compilação → o erro mostra a linha. Use edit_file direto → recompile. Max 5 tentativas.
+ANTI-LOOP: Se o MESMO erro ("Undefined control sequence" sem linha) aparecer 2x seguidas → PARE de tentar trocar ícones aleatoriamente. Em vez disso:
+1. Leia o .tex e procure: \\foreach com 3+ variáveis, \\fontspec, \\fontsize, comandos TikZ complexos.
+2. Simplifique: reescreva o trecho problemático sem \\foreach (use \\node manual) e sem comandos exóticos.
+3. Se ainda falhar na 3ª tentativa → reescreva o arquivo inteiro com estrutura mais simples.
 Overfull hbox > 10pt → conteúdo cortado. CORRIJA (reduza texto, \\small, ajuste coluna) sem perguntar. Máx 2 tentativas para o MESMO warning — se persistir após 2 edits, é do header/footer (injetado automaticamente, fora do seu controle). Informe e siga em frente.
 Overfull hbox ≤ 10pt → cosmético, mencione brevemente.
 "no line here to end" → \\\\ fora de tabular. Remova o \\\\ ou use \\newline.`;

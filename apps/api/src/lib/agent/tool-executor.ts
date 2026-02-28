@@ -576,7 +576,7 @@ async function compileLatexFile(
   console.log("[compile_latex] step 4: sanitize START", isBeamer ? "(Beamer — light)" : "");
   const sanitizeStart = Date.now();
   let latexSource = isBeamer
-    ? sourceForSanitize.replace(/[\u2600-\u27BF\u{1F000}-\u{10FFFF}]/gu, "") // strip emoji only
+    ? fixBeamerSource(sourceForSanitize) // Beamer-specific fixes + emoji strip
     : sanitizeLatexSource(sourceForSanitize);
   console.log("[compile_latex] step 4a: sanitize done in", Date.now() - sanitizeStart, "ms");
   // --- Article-only fixes (skip for Beamer — these patterns don't exist in slides) ---
@@ -622,8 +622,6 @@ async function compileLatexFile(
     "warning": "exclamation-triangle", "close": "times", "remove": "times",
     "ban-circle": "ban", "file-text": "file-alt",
     "bar-chart": "chart-bar", "line-chart": "chart-line", "pie-chart": "chart-pie",
-    "globe-americas": "globe", "globe-africa": "globe",
-    "globe-asia": "globe", "globe-europe": "globe",
     "comments-alt": "comments", "lightbulb-o": "lightbulb",
     "heart-o": "heart", "star-o": "star", "bookmark-o": "bookmark",
     "folder-o": "folder", "file-o": "file", "calendar-o": "calendar-alt",
@@ -1268,6 +1266,50 @@ function guessMimeType(path: string): string {
     svg: "image/svg+xml",
   };
   return map[ext || ""] || "application/octet-stream";
+}
+
+/**
+ * Fix common Beamer-specific LaTeX issues that cause compilation failures.
+ * Applied instead of the heavy article sanitizer.
+ */
+function fixBeamerSource(source: string): string {
+  let result = source;
+
+  // Strip emoji
+  result = result.replace(/[\u2600-\u27BF\u{1F000}-\u{10FFFF}]/gu, "");
+
+  // Fix \fontspec → replace with inputenc+fontenc (fontspec is XeLaTeX only)
+  if (result.includes("\\usepackage{fontspec}")) {
+    result = result.replace(/\\usepackage\{fontspec\}[^\n]*/g, "");
+    // Ensure inputenc and fontenc are present
+    const beforeDoc = result.substring(0, result.indexOf("\\begin{document}") || result.length);
+    if (!beforeDoc.includes("\\usepackage[utf8]{inputenc}")) {
+      result = result.replace(
+        /(\\documentclass[^\n]*\n)/,
+        "$1\\usepackage[utf8]{inputenc}\n\\usepackage[T1]{fontenc}\n"
+      );
+    }
+    console.log("[fixBeamerSource] replaced \\fontspec with inputenc+fontenc");
+  }
+
+  // Fix -{Stealth} → -stealth (Stealth requires arrows.meta which may not be loaded)
+  if (result.includes("-{Stealth}") && !result.includes("arrows.meta")) {
+    result = result.replace(/-\{Stealth\}/g, "-stealth");
+    result = result.replace(/-\{Stealth\[/g, "-stealth");
+    console.log("[fixBeamerSource] replaced -{Stealth} with -stealth");
+  }
+
+  // Fix \foreach with too many variables (3+) — common AI mistake
+  // Detect: \foreach \a/\b/\c/\d/\e in { ... } (3+ slash-separated vars)
+  const foreachMatch = result.match(/\\foreach\s+((?:\\[a-zA-Z]+\s*\/\s*){2,}\\[a-zA-Z]+)\s+(?:\[.*?\]\s+)?in\s*\{/);
+  if (foreachMatch) {
+    const varCount = (foreachMatch[1].match(/\\/g) || []).length;
+    if (varCount >= 4) {
+      console.log(`[fixBeamerSource] WARNING: \\foreach with ${varCount} variables detected — likely to fail`);
+    }
+  }
+
+  return result;
 }
 
 /**

@@ -290,6 +290,37 @@ function isBeamerDocument(source) {
 }
 
 /**
+ * Fix common Beamer-specific LaTeX issues that cause compilation failures.
+ */
+function fixBeamerSource(source) {
+  let result = source;
+
+  // Strip emoji
+  result = result.replace(/[\u2600-\u27BF\u{1F000}-\u{10FFFF}]/gu, "");
+
+  // Fix \fontspec → replace with inputenc+fontenc (fontspec is XeLaTeX only)
+  if (result.includes("\\usepackage{fontspec}")) {
+    result = result.replace(/\\usepackage\{fontspec\}[^\n]*/g, "");
+    const beforeDoc = result.substring(0, result.indexOf("\\begin{document}") || result.length);
+    if (!beforeDoc.includes("\\usepackage[utf8]{inputenc}")) {
+      result = result.replace(
+        /(\\documentclass[^\n]*\n)/,
+        "$1\\usepackage[utf8]{inputenc}\n\\usepackage[T1]{fontenc}\n"
+      );
+    }
+    console.log("[fixBeamerSource] replaced \\fontspec with inputenc+fontenc");
+  }
+
+  // Fix -{Stealth} → -stealth (Stealth requires arrows.meta which may not be loaded)
+  if (result.includes("-{Stealth}") && !result.includes("arrows.meta")) {
+    result = result.replace(/-\{Stealth\}/g, "-stealth");
+    console.log("[fixBeamerSource] replaced -{Stealth} with -stealth");
+  }
+
+  return result;
+}
+
+/**
  * Inject AEE colors and essential packages into a Beamer preamble.
  * Preserves the AI-generated Beamer structure (theme, frames, etc.)
  * but adds our standard color palette so \color{aeeblue} etc. work.
@@ -503,10 +534,6 @@ function fixEnvironmentSyntax(source) {
     "bar-chart": "chart-bar",
     "line-chart": "chart-line",
     "pie-chart": "chart-pie",
-    "globe-americas": "globe",
-    "globe-africa": "globe",
-    "globe-asia": "globe",
-    "globe-europe": "globe",
     "comments-alt": "comments",
     "lightbulb-o": "lightbulb",
     "heart-o": "heart",
@@ -604,9 +631,10 @@ export async function compileLatexLocal(relPath, workDir) {
   const isBeamer = isBeamerDocument(rawSource);
   if (rawSource.includes("\\begin{document}")) {
     if (isBeamer) {
-      // Beamer: preserve AI preamble, just inject AEE colors + essential packages
-      compileSource = injectBeamerColors(rawSource);
-      console.log("[compileLatexLocal] Beamer detected — injected colors only");
+      // Beamer: apply Beamer-specific fixes, then inject AEE colors
+      compileSource = fixBeamerSource(rawSource);
+      compileSource = injectBeamerColors(compileSource);
+      console.log("[compileLatexLocal] Beamer detected — applied Beamer fixes + injected colors");
     } else {
       // Standard documents: replace with professional AEE preamble
       const fallbackTitle = relPath.replace(/\.tex$/, "").replace(/[-_]/g, " ");

@@ -168,9 +168,14 @@ function findTextDeserts(lines) {
   const THRESHOLD = 25;
   let desertStart = -1;
   let consecutive = 0;
+  let insideTikz = 0; // nesting depth for tikzpicture
 
   for (let i = 0; i < lines.length; i++) {
-    if (isVisualLine(lines[i])) {
+    const trimmed = lines[i].trim();
+    if (trimmed.includes("\\begin{tikzpicture}")) insideTikz++;
+    if (trimmed.includes("\\end{tikzpicture}")) insideTikz = Math.max(0, insideTikz - 1);
+
+    if (insideTikz > 0 || isVisualLine(lines[i])) {
       if (consecutive >= THRESHOLD) {
         deserts.push({ startLine: desertStart + 1, endLine: i, lineCount: consecutive });
       }

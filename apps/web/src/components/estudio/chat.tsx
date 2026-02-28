@@ -382,7 +382,7 @@ export function Chat({
         if (res.success && res.data) {
           setMessages(
             res.data
-              .filter((m) => (m.role === "user" || m.role === "assistant") && m.content && m.content !== "(processando...)")
+              .filter((m) => (m.role === "user" || m.role === "assistant") && m.content && !m.content.startsWith("(processando"))
               .map((m) => ({
                 id: m.id,
                 role: m.role as "user" | "assistant",

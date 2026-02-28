@@ -111,7 +111,13 @@ def _parse_latex_errors(lines: list[str]) -> str:
     if not errors:
         return ""
 
-    return "\n\n".join(errors)
+    result = "\n\n".join(errors)
+
+    # Add Beamer hints when error points to \end{frame} (common with TikZ/foreach errors)
+    if re.search(r"\\end\{frame\}", result):
+        result += "\n\nDICA: O erro aponta para \\end{frame}, mas a causa real provavelmente está ACIMA — procure por: \\foreach com muitas variáveis, \\fontsize, comandos TikZ complexos, ou \\fontspec (incompatível com pdflatex)."
+
+    return result
 
 
 MAX_IMAGES_TOTAL_BYTES = 10 * 1024 * 1024  # 10 MB

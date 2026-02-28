@@ -625,7 +625,7 @@ workspaceChatRoutes.get("/projects/:id/messages", async (c) => {
 
     // Clean up orphaned progressive-save placeholders (empty or "(processando...)")
     const orphans = messages.filter(
-      (m) => m.role === "assistant" && (!m.content || m.content === "(processando...)")
+      (m) => m.role === "assistant" && (!m.content || m.content.startsWith("(processando"))
     );
     if (orphans.length > 0) {
       await Promise.all(
@@ -858,10 +858,12 @@ async function createStreamingAgentResponse(opts: {
     try {
       const text = assistantTextParts.join("");
       const tc = toolCallsData;
+      // Use a descriptive placeholder instead of generic "(processando...)"
+      const placeholder = tc.length > 0 ? "(processando tools...)" : "(processando...)";
       await db
         .update(workspaceMessages)
         .set({
-          content: text || "(processando...)",
+          content: text || placeholder,
           toolCalls: tc.length > 0 ? JSON.stringify(tc) : null,
         })
         .where(eq(workspaceMessages.id, assistantMsgId));
