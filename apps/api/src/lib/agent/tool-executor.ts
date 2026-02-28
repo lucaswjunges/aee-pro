@@ -597,8 +597,11 @@ async function compileLatexFile(
     // Fix common invalid FontAwesome 5 icon names
     const iconFixes: Record<string, string> = {
       "pill": "pills", "scissors": "cut", "volume-mute": "volume-off",
-      "map-signs": "map-marker-alt", "pencil": "pencil-alt", "gear": "cog",
-      "gears": "cogs", "warning": "exclamation-triangle", "close": "times",
+      "map-signs": "map-marker-alt", "hand-o-right": "hand-point-right",
+      "hand-o-left": "hand-point-left", "hand-o-up": "hand-point-up",
+      "pencil": "pencil-alt", "gear": "cog", "gears": "cogs",
+      "warning": "exclamation-triangle", "close": "times", "remove": "times",
+      "ban-circle": "ban", "file-text": "file-alt",
       "bar-chart": "chart-bar", "line-chart": "chart-line", "pie-chart": "chart-pie",
     };
     for (const [wrong, correct] of Object.entries(iconFixes)) {
@@ -607,6 +610,38 @@ async function compileLatexFile(
         `\\faIcon{${correct}}`
       );
     }
+    // Fix Unicode math symbols that break pdflatex (inputenc[utf8]+T1 handles basic typography)
+    const unicodeFixes: Record<string, string> = {
+      "\u00D7": "$\\times$",       // ×
+      "\u00F7": "$\\div$",         // ÷
+      "\u2265": "$\\geq$",         // ≥
+      "\u2264": "$\\leq$",         // ≤
+      "\u2260": "$\\neq$",         // ≠
+      "\u2192": "$\\rightarrow$",  // →
+      "\u2190": "$\\leftarrow$",   // ←
+      "\u2191": "$\\uparrow$",     // ↑
+      "\u2193": "$\\downarrow$",   // ↓
+      "\u221E": "$\\infty$",       // ∞
+      "\u221A": "$\\sqrt{}$",      // √
+      "\u2248": "$\\approx$",      // ≈
+      "\u2713": "\\cmark{}",       // ✓
+      "\u2717": "\\ding{55}",      // ✗
+    };
+    for (const [char, replacement] of Object.entries(unicodeFixes)) {
+      if (latexSource.includes(char)) {
+        latexSource = latexSource.split(char).join(replacement);
+      }
+    }
+    // Fix \item directly inside tcolorbox (needs \begin{itemize} wrapper)
+    const boxEnvs = "materialbox|infobox|alertbox|successbox|warnbox|tealbox|purplebox|goldbox|dicabox|sessaobox|datacard|atividadebox";
+    latexSource = latexSource.replace(
+      new RegExp(`(\\\\begin\\{(?:${boxEnvs})\\}(?:\\[[^\\]]*\\])?(?:\\{[^}]*\\})?)\\s*\n(\\s*\\\\item\\b)`, "g"),
+      "$1\n\\begin{itemize}\n$2"
+    );
+    latexSource = latexSource.replace(
+      new RegExp(`(\\\\item\\b[^\n]*)\n(\\s*\\\\end\\{(?:${boxEnvs})\\})`, "g"),
+      "$1\n\\end{itemize}\n$2"
+    );
     // Fix \\ after sectioning commands — causes "There's no line here to end"
     latexSource = fixLineBreakAfterSectioning(latexSource);
     console.log("[compile_latex] step 4b: fixLineBreak done");

@@ -430,6 +430,43 @@ function fixEnvironmentSyntax(source) {
     );
   }
 
+  // Fix Unicode math symbols that break pdflatex (inputenc[utf8]+T1 handles basic typography)
+  const unicodeFixes = {
+    "\u00D7": "$\\times$",       // ×
+    "\u00F7": "$\\div$",         // ÷
+    "\u2265": "$\\geq$",         // ≥
+    "\u2264": "$\\leq$",         // ≤
+    "\u2260": "$\\neq$",         // ≠
+    "\u2192": "$\\rightarrow$",  // →
+    "\u2190": "$\\leftarrow$",   // ←
+    "\u2191": "$\\uparrow$",     // ↑
+    "\u2193": "$\\downarrow$",   // ↓
+    "\u221E": "$\\infty$",       // ∞
+    "\u221A": "$\\sqrt{}$",      // √
+    "\u2248": "$\\approx$",      // ≈
+    "\u2713": "\\cmark{}",       // ✓
+    "\u2717": "\\ding{55}",      // ✗
+  };
+  for (const [char, replacement] of Object.entries(unicodeFixes)) {
+    if (result.includes(char)) {
+      result = result.split(char).join(replacement);
+    }
+  }
+
+  // Fix \item directly inside tcolorbox environments (needs \begin{itemize} wrapper)
+  // Matches: \begin{materialbox}\n\item or \begin{infobox}[T]\n\item etc.
+  const boxEnvs = "materialbox|infobox|alertbox|successbox|warnbox|tealbox|purplebox|goldbox|dicabox|sessaobox|datacard|atividadebox";
+  result = result.replace(
+    new RegExp(`(\\\\begin\\{(?:${boxEnvs})\\}(?:\\[[^\\]]*\\])?(?:\\{[^}]*\\})?)\\s*\n(\\s*\\\\item\\b)`, "g"),
+    "$1\n\\begin{itemize}\n$2"
+  );
+  // Add matching \end{itemize} before \end{boxenv} when we added \begin{itemize}
+  // This is conservative: only if last \item line is followed by \end{boxenv}
+  result = result.replace(
+    new RegExp(`(\\\\item\\b[^\n]*)\n(\\s*\\\\end\\{(?:${boxEnvs})\\})`, "g"),
+    "$1\n\\end{itemize}\n$2"
+  );
+
   return result;
 }
 

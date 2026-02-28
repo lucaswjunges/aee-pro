@@ -166,7 +166,7 @@ AMBIENTES (use generosamente):
 Boxes com título opcional: infobox[T], alertbox[T], successbox[T], warnbox[T], tealbox[T], purplebox[T], goldbox[T]
 datacard[T] — cartão cinza para dados | sessaobox[T] — sessão grande | dicabox — dica amarela
 \\begin{atividadebox}[cor]{Título} — atividade colorida (cor opcional em [], título obrigatório em {})
-materialbox — lista de materiais (sem argumentos)
+materialbox — lista de materiais (sem argumentos). Use \\begin{itemize}...\\end{itemize} DENTRO do materialbox.
 \\field{rótulo}{valor} — SOMENTE dentro de tabularx com 2 colunas (lX). Já contém & e \\\\ internamente.
 \\fieldline{rótulo}{valor} — inline (fora de tabelas)
 \\faIcon{nome} — ícone FontAwesome 5 Free. Ícones VÁLIDOS mais usados:
